@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ t.title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="page-header">
+        <h1>{{ t.title }}</h1>
+        <div class="header-controls">
+          <a class="btn secondary" href="{{ url_for('simulator', lang=lang) }}">{{ t.simulator }}</a>
+          <form method="get" action="{{ url_for('index') }}" class="lang-form">
+            <input type="hidden" name="classification" value="{{ selected_classification }}" />
+            <input type="hidden" name="sort_by" value="{{ sort_by }}" />
+            <input type="hidden" name="widget_tf" value="{{ widget_tf }}" />
+            <select name="lang" onchange="this.form.submit()">
+              <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
+              <option value="he" {% if lang == 'he' %}selected{% endif %}>עברית</option>
+            </select>
+          </form>
+          <div class="status status-{{ status }}">{{ t.status }}: {{ status|upper }}</div>
+        </div>
+      </header>
+
+      {% if error_message %}
+      <section class="panel error">
+        <strong>Run failed:</strong> {{ error_message }}
+      </section>
+      {% endif %}
+
+      <section class="actions panel">
+        <form method="post" action="{{ url_for('run_again') }}" id="run-form">
+          <input type="hidden" name="lang" value="{{ lang }}" />
+          <input type="hidden" name="classification" value="{{ selected_classification }}" />
+          <input type="hidden" name="sort_by" value="{{ sort_by }}" />
+          <input type="hidden" name="widget_tf" value="{{ widget_tf }}" />
+          <button type="submit" class="btn">{{ t.run_again }}</button>
+        </form>
+
+        <form method="get" action="{{ url_for('index') }}" class="filter-form">
+          <input type="hidden" name="lang" value="{{ lang }}" />
+          <label for="classification">{{ t.filter }}:</label>
+          <select name="classification" id="classification">
+            <option value="ALL" {% if selected_classification == 'ALL' %}selected{% endif %}>{{ t.all }}</option>
+            <option value="BUY" {% if selected_classification == 'BUY' %}selected{% endif %}>BUY</option>
+            <option value="WATCH" {% if selected_classification == 'WATCH' %}selected{% endif %}>WATCH</option>
+            <option value="AVOID" {% if selected_classification == 'AVOID' %}selected{% endif %}>AVOID</option>
+          </select>
+
+          <label for="sort_by">{{ t.sort }}:</label>
+          <select name="sort_by" id="sort_by">
+            <option value="score" {% if sort_by == 'score' %}selected{% endif %}>{{ t.sort_score }}</option>
+            <option value="setup_quality" {% if sort_by == 'setup_quality' %}selected{% endif %}>{{ t.sort_setup }}</option>
+            <option value="entry_timing" {% if sort_by == 'entry_timing' %}selected{% endif %}>{{ t.sort_entry }}</option>
+            <option value="momentum" {% if sort_by == 'momentum' %}selected{% endif %}>{{ t.sort_momentum }}</option>
+            <option value="relative_strength" {% if sort_by == 'relative_strength' %}selected{% endif %}>{{ t.sort_rs }}</option>
+            <option value="distance_from_highs" {% if sort_by == 'distance_from_highs' %}selected{% endif %}>{{ t.sort_highs }}</option>
+          </select>
+
+          <label for="widget_tf">{{ t.timeframe }}:</label>
+          <select name="widget_tf" id="widget_tf">
+            <option value="d" {% if widget_tf == 'd' %}selected{% endif %}>{{ t.tf_d }}</option>
+            <option value="w" {% if widget_tf == 'w' %}selected{% endif %}>{{ t.tf_w }}</option>
+            <option value="m" {% if widget_tf == 'm' %}selected{% endif %}>{{ t.tf_m }}</option>
+          </select>
+
+          <button type="submit" class="btn secondary">{{ t.apply }}</button>
+        </form>
+      </section>
+
+      {% if run and run.market_widgets %}
+      <section class="panel">
+        <h3 class="panel-title">{{ t.market_widgets }}</h3>
+        <div class="widgets-grid">
+          {% for widget in run.market_widgets %}
+          <article class="widget-card">
+            <div class="widget-title">{{ widget.name }} <span class="tf-tag">({{ widget.timeframe }})</span></div>
+            <div class="mini-candle-chart">
+              {% for c in widget.candles %}
+              <div class="mini-candle {{ 'up' if c.up else 'down' }}">
+                <div class="wick" style="top: {{ c.high_top }}%; height: {{ c.wick_height }}%;"></div>
+                <div class="body" style="top: {{ c.body_top }}%; height: {{ c.body_height }}%;"></div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="widget-metrics">
+              <strong>{{ widget.price }}</strong>
+              <span class="change {{ 'up' if widget.is_up else 'down' }}">
+                {{ '▲' if widget.is_up else '▼' }} {{ widget.change_pct }}%
+              </span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if not run %}
+      <section class="panel">
+        <p>{{ t.no_run }}</p>
+      </section>
+      {% else %}
+      <section class="panel summary-grid">
+        <div><strong>run_id:</strong> {{ run.run_id }}</div>
+        <div><strong>generated_at:</strong> {{ run.generated_at|et_time }}</div>
+        <div><strong>{{ t.stocks_analyzed }}:</strong> {{ run.diagnostics.total_tickers_analyzed }}</div>
+        <div><strong>BUY:</strong> {{ run.diagnostics.buy_count }}</div>
+        <div><strong>WATCH:</strong> {{ run.diagnostics.watch_count }}</div>
+        <div><strong>AVOID:</strong> {{ run.diagnostics.avoid_count }}</div>
+        <div><strong>average_total_score:</strong> {{ run.diagnostics.average_total_score|number }}</div>
+        <div><strong>top_5_tickers:</strong> {{ run.diagnostics.top_5_tickers|join(', ') }}</div>
+        <div><strong>bottom_5_tickers:</strong> {{ run.diagnostics.bottom_5_tickers|join(', ') }}</div>
+        {% if run.diagnostics.sector_concentration_warning %}
+        <div><strong>sector_warning:</strong> {{ run.diagnostics.sector_concentration_warning }}</div>
+        {% endif %}
+      </section>
+
+      <section class="panel table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ t.col_ticker }} <span class="help" data-tip="{{ t.help_ticker }}" title="{{ t.help_ticker }}">?</span></th>
+              <th>{{ t.col_price }} <span class="help" data-tip="{{ t.help_price }}" title="{{ t.help_price }}">?</span></th>
+              <th>{{ t.col_score }} <span class="help" data-tip="{{ t.help_score }}" title="{{ t.help_score }}">?</span></th>
+              <th>{{ t.col_setup }} <span class="help" data-tip="{{ t.help_setup }}" title="{{ t.help_setup }}">?</span></th>
+              <th>{{ t.col_entry_timing }} <span class="help" data-tip="{{ t.help_entry_timing }}" title="{{ t.help_entry_timing }}">?</span></th>
+              <th>{{ t.col_class }} <span class="help" data-tip="{{ t.help_class }}" title="{{ t.help_class }}">?</span></th>
+              <th>{{ t.col_buyability }} <span class="help" data-tip="{{ t.help_buyability }}" title="{{ t.help_buyability }}">?</span></th>
+              <th>{{ t.col_entry }} <span class="help" data-tip="{{ t.help_entry }}" title="{{ t.help_entry }}">?</span></th>
+              <th>{{ t.col_stop }} <span class="help" data-tip="{{ t.help_stop }}" title="{{ t.help_stop }}">?</span></th>
+              <th>{{ t.col_target }} <span class="help" data-tip="{{ t.help_target }}" title="{{ t.help_target }}">?</span></th>
+              <th>{{ t.col_rr }} <span class="help" data-tip="{{ t.help_rr }}" title="{{ t.help_rr }}">?</span></th>
+              <th>{{ t.col_sector }} <span class="help" data-tip="{{ t.help_sector }}" title="{{ t.help_sector }}">?</span></th>
+              <th>{{ t.col_signals }} <span class="help" data-tip="{{ t.help_signals }}" title="{{ t.help_signals }}">?</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>
+                <strong><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.ticker }}</a></strong>
+              </td>
+              <td>{{ row.latest_close|currency }}</td>
+              <td>{{ row.score|number }}</td>
+              <td>{{ row.setup_quality_score|number }}</td>
+              <td>{{ row.entry_timing_score|number }}</td>
+              <td><span class="badge badge-{{ row.classification|lower }}">{{ row.classification }}</span></td>
+              <td><span class="buyability buyability-{{ row.buyability_status|lower }}">{{ row.buyability_status }}</span></td>
+              <td>{{ row.suggested_entry|currency if row.suggested_entry is not none else '-' }}</td>
+              <td>{{ row.suggested_stop_loss|currency if row.suggested_stop_loss is not none else '-' }}</td>
+              <td>{{ row.suggested_first_target|currency if row.suggested_first_target is not none else '-' }}</td>
+              <td>{{ (row.plan_reward_risk_ratio if row.plan_reward_risk_ratio is not none else row.reward_risk_ratio)|number }}</td>
+              <td>{{ row.sector }}</td>
+              <td>{{ row.reasons_display|join(', ') }}</td>
+            </tr>
+            <tr class="details-row">
+              <td colspan="13">
+                <details>
+                  <summary>{{ t.details }}: {{ row.ticker }}</summary>
+                  <p>{{ row.explanation }}</p>
+                  <p><strong>{{ t.col_buyability }}:</strong> {{ row.buyability_status }} - {{ row.buyability_reason }}</p>
+
+                  <div class="details-grid">
+                    <div>
+                      <h4>{{ t.visual_signals }}</h4>
+                      <div class="visual-signal-list">
+                        {% for signal in row.visual_signals %}
+                        <div class="visual-signal signal-{{ signal.color }}">
+                          <span>{{ signal.label }}</span>
+                          <strong>{{ signal.level }}</strong>
+                        </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4>{{ t.component_scores }}</h4>
+                      <div class="score-bars">
+                        {% for bar in row.score_bars %}
+                        <div class="bar-item">
+                          <span class="bar-label">{{ bar.label }}</span>
+                          <div class="bar-track"><div class="bar-fill" style="width: {{ bar.value }}%;"></div></div>
+                          <span class="bar-value">{{ bar.value }}</span>
+                        </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4>{{ t.main_features }}</h4>
+                      <ul>
+                        <li>MA20: {{ row.feature_snapshot.ma_20|number }}</li>
+                        <li>MA50: {{ row.feature_snapshot.ma_50|number }}</li>
+                        <li>RSI14: {{ row.feature_snapshot.rsi_14|number }}</li>
+                        <li>ATR14: {{ row.feature_snapshot.atr_14|number }}</li>
+                        <li>distance_from_ma20: {{ row.feature_snapshot.distance_from_ma20|pct }}</li>
+                        <li>distance_to_resistance: {{ row.feature_snapshot.distance_to_resistance|pct }}</li>
+                        <li>distance_to_support: {{ row.feature_snapshot.distance_to_support|pct }}</li>
+                        <li>dist_from_52w_high: {{ row.feature_snapshot.dist_from_52w_high|pct }}</li>
+                        <li>relative_strength: {{ row.feature_snapshot.relative_strength|number }}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </details>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>
