@@ -18,6 +18,7 @@ from services.analysis_runner import AnalysisRunner
 from services.report_service import ReportService
 from storage.csv_repository import AnalysisResultCsvRepository
 from storage.json_repository import AnalysisResultJsonRepository
+from storage.supabase_market_data_cache import SupabaseMarketDataCache
 from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
@@ -30,6 +31,9 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         min_history_rows=settings.min_history_rows,
         cache_enabled=settings.cache_enabled,
         force_refresh=settings.force_refresh,
+        supabase_cache=SupabaseMarketDataCache(
+            db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+        ),
     )
 
     scorer = StockScorer(

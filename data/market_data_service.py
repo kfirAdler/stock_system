@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from data.base_provider import MarketDataProvider
+from storage.supabase_market_data_cache import SupabaseMarketDataCache
 
 
 @dataclass
@@ -19,6 +20,7 @@ class MarketDataService:
     min_history_rows: int = 120
     cache_enabled: bool = True
     force_refresh: bool = False
+    supabase_cache: SupabaseMarketDataCache | None = None
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
@@ -27,15 +29,17 @@ class MarketDataService:
     def get_history(self, ticker: str, use_cache: bool = True) -> pd.DataFrame:
         cache_file = self.raw_data_dir / f"{ticker.upper()}.csv"
         allow_cache = self.cache_enabled and use_cache
+        use_supabase_cache = self.supabase_cache is not None and self.supabase_cache.enabled
 
-        if allow_cache and cache_file.exists() and not self.force_refresh:
-            cached = self._read_cached(cache_file)
+        if allow_cache and not self.force_refresh:
+            cached = self.supabase_cache.load_history(ticker) if use_supabase_cache else self._read_cached(cache_file)
             validated_cached = self._validate(cached, ticker, allow_short=True)
             if validated_cached.empty:
                 self._logger.info("Cache for %s is invalid, fetching full history", ticker)
                 return self._fetch_and_cache_full(ticker, cache_file)
 
-            self._logger.info("Loaded %s rows for %s from cache", len(validated_cached), ticker)
+            source = "Supabase cache" if use_supabase_cache else "file cache"
+            self._logger.info("Loaded %s rows for %s from %s", len(validated_cached), ticker, source)
             last_cached_date = validated_cached.index.max().date()
             last_complete_date = date.today() - timedelta(days=1)
             if last_cached_date >= last_complete_date:
@@ -61,7 +65,10 @@ class MarketDataService:
             merged = self._merge_frames(validated_cached, incremental)
             validated_merged = self._validate(merged, ticker)
             if not validated_merged.empty:
-                validated_merged.to_csv(cache_file)
+                if use_supabase_cache:
+                    self.supabase_cache.save_history(ticker=ticker, frame=validated_merged)
+                else:
+                    validated_merged.to_csv(cache_file)
                 self._logger.info("Merged and saved updated raw data for %s", ticker)
             return validated_merged
 
@@ -78,8 +85,12 @@ class MarketDataService:
         fetched = self.provider.fetch_history(ticker=ticker)
         validated = self._validate(fetched, ticker)
         if not validated.empty:
-            validated.to_csv(cache_file)
-            self._logger.info("Saved %s rows to cache for %s", len(validated), ticker)
+            if self.supabase_cache is not None and self.supabase_cache.enabled:
+                self.supabase_cache.save_history(ticker=ticker, frame=validated)
+                self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
+            else:
+                validated.to_csv(cache_file)
+                self._logger.info("Saved %s rows to file cache for %s", len(validated), ticker)
         return validated
 
     def _read_cached(self, cache_file: Path) -> pd.DataFrame:

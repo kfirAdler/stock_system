@@ -93,6 +93,7 @@ On Render, attach a persistent disk (example mount path `/var/data`) and set:
 
 When `SAVE_TO_SUPABASE=true` and `SUPABASE_DB_URL` is set:
 
+- raw OHLCV cache is saved in Supabase table `market_raw_data`
 - scanner runs are saved to Supabase tables
 - simulator actions and equity points are saved to Supabase
 - dashboard loads latest run from Supabase first (falls back to local JSON if unavailable)
