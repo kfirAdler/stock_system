@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -61,8 +62,10 @@ class AppSettings:
     simulation: SimulationSettings = field(default_factory=SimulationSettings)
 
     def __post_init__(self) -> None:
+        output_dir_env = os.environ.get("OUTPUT_DIR", "").strip()
+        output_root = Path(output_dir_env).expanduser() if output_dir_env else (self.project_root / "output")
         object.__setattr__(self, "tickers_file", self.project_root / "config" / "tickers.json")
-        object.__setattr__(self, "output_dir", self.project_root / "output")
+        object.__setattr__(self, "output_dir", output_root)
         object.__setattr__(self, "raw_data_dir", self.output_dir / "raw_data")
         object.__setattr__(self, "analyses_dir", self.output_dir / "analyses")
         object.__setattr__(self, "portfolios_dir", self.output_dir / "portfolios")
