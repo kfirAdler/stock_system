@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import AppSettings
 from dashboard.data_service import DashboardDataService
+from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class DashboardSimulatorService:
     settings: AppSettings
     data_service: DashboardDataService
     config: SimulatorConfig = field(default_factory=SimulatorConfig)
+    supabase_repository: SupabasePostgresRepository | None = None
 
     _ACTION_MESSAGES: dict[str, str] = field(
         default_factory=lambda: {
@@ -333,6 +335,8 @@ class DashboardSimulatorService:
         with self._equity_file.open("a", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row.keys()))
             writer.writerow(row)
+        if self.supabase_repository is not None and self.supabase_repository.enabled:
+            self.supabase_repository.save_simulator_equity(row)
 
     def _seed_equity_if_needed(self, state: dict[str, Any], timestamp: datetime) -> None:
         if self._equity_file.exists() and self._equity_file.stat().st_size > 0:
@@ -400,6 +404,10 @@ class DashboardSimulatorService:
         }
         with self._actions_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload) + "\n")
+        if self.supabase_repository is not None and self.supabase_repository.enabled:
+            enriched_payload = dict(payload)
+            enriched_payload["action_display"] = self._ACTION_MESSAGES.get(action, action.replace("_", " ").title())
+            self.supabase_repository.save_simulator_action(enriched_payload)
 
     def _log_once(
         self,

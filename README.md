@@ -79,6 +79,8 @@ Set environment variables:
 
 - `FLASK_SECRET_KEY` = any strong random value
 - `OUTPUT_DIR` = `/var/data/output` (recommended when using Render Disk)
+- `SAVE_TO_SUPABASE` = `true` (if you want DB persistence)
+- `SUPABASE_DB_URL` = Supabase Postgres connection URL
 
 ### Persistent data
 
@@ -86,3 +88,11 @@ The app writes cache/results under `OUTPUT_DIR`.
 On Render, attach a persistent disk (example mount path `/var/data`) and set:
 
 - `OUTPUT_DIR=/var/data/output`
+
+### Supabase mode
+
+When `SAVE_TO_SUPABASE=true` and `SUPABASE_DB_URL` is set:
+
+- scanner runs are saved to Supabase tables
+- simulator actions and equity points are saved to Supabase
+- dashboard loads latest run from Supabase first (falls back to local JSON if unavailable)

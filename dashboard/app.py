@@ -11,6 +11,7 @@ from app.main import build_runner
 from config.settings import AppSettings
 from dashboard.data_service import DashboardDataService
 from dashboard.simulator_service import DashboardSimulatorService
+from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
 def _texts(lang: str) -> dict[str, str]:
@@ -195,8 +196,15 @@ def create_app() -> Flask:
 
     settings = AppSettings()
     settings.ensure_directories()
-    data_service = DashboardDataService(settings=settings)
-    simulator_service = DashboardSimulatorService(settings=settings, data_service=data_service)
+    supabase_repository = SupabasePostgresRepository(
+        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+    )
+    data_service = DashboardDataService(settings=settings, supabase_repository=supabase_repository)
+    simulator_service = DashboardSimulatorService(
+        settings=settings,
+        data_service=data_service,
+        supabase_repository=supabase_repository,
+    )
     market_tz = ZoneInfo("America/New_York")
 
     @app.template_filter("currency")

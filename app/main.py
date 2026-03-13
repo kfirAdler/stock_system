@@ -18,6 +18,7 @@ from services.analysis_runner import AnalysisRunner
 from services.report_service import ReportService
 from storage.csv_repository import AnalysisResultCsvRepository
 from storage.json_repository import AnalysisResultJsonRepository
+from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
 def build_runner(settings: AppSettings) -> AnalysisRunner:
@@ -60,6 +61,9 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         json_repository=AnalysisResultJsonRepository(
             analyses_dir=settings.analyses_dir,
             portfolios_dir=settings.portfolios_dir,
+        ),
+        supabase_repository=SupabasePostgresRepository(
+            db_url=settings.supabase_db_url if settings.save_to_supabase else None,
         ),
         benchmark_symbol=settings.benchmark_symbol,
     )

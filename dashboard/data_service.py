@@ -12,6 +12,7 @@ import pandas as pd
 import requests
 
 from config.settings import AppSettings
+from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
 @dataclass
@@ -19,8 +20,17 @@ class DashboardDataService:
     """Loads latest scanner outputs and prepares dashboard view models."""
 
     settings: AppSettings
+    supabase_repository: SupabasePostgresRepository | None = None
 
     def latest_run_id(self) -> str | None:
+        if self.supabase_repository is not None and self.supabase_repository.enabled:
+            try:
+                payload = self.supabase_repository.load_latest_run_payload()
+                if payload is not None:
+                    return str(payload.get("run_id") or "latest")
+            except Exception:  # noqa: BLE001
+                pass
+
         analyses_dir = self.settings.analyses_dir
         if not analyses_dir.exists():
             return None
@@ -46,6 +56,14 @@ class DashboardDataService:
         sort_by: str = "score",
         widget_tf: str = "d",
     ) -> dict[str, Any] | None:
+        if self.supabase_repository is not None and self.supabase_repository.enabled:
+            try:
+                payload = self.supabase_repository.load_latest_run_payload()
+                if payload is not None:
+                    return self._build_view_from_db_payload(payload=payload, lang=lang, sort_by=sort_by, widget_tf=widget_tf)
+            except Exception:  # noqa: BLE001
+                pass
+
         analysis_file = self.settings.analyses_dir / run_id / "current_analysis.json"
         diagnostics_file = self.settings.analyses_dir / run_id / "run_diagnostics.json"
         plans_file = self.settings.analyses_dir / run_id / "trade_plans.json"
@@ -113,6 +131,98 @@ class DashboardDataService:
             "market_widgets": self._load_market_widgets(widget_tf=widget_tf),
             "widget_tf": widget_tf,
         }
+
+    def _build_view_from_db_payload(
+        self,
+        payload: dict[str, Any],
+        lang: str,
+        sort_by: str,
+        widget_tf: str,
+    ) -> dict[str, Any]:
+        analyses = payload.get("analyses", [])
+        diagnostics = payload.get("diagnostics", {})
+        plans = payload.get("plans", [])
+        backtest = payload.get("backtest", {})
+        generated_at = payload.get("generated_at", "")
+        run_id = payload.get("run_id", "latest")
+
+        plan_map = {str(item.get("ticker", "")).upper(): item for item in plans}
+        rows: list[dict[str, Any]] = []
+
+        for item in analyses:
+            ticker = str(item.get("ticker", "")).upper()
+            plan = plan_map.get(ticker, {})
+            components = self._ensure_dict(item.get("component_scores"))
+            features = self._ensure_dict(item.get("feature_snapshot"))
+            reasons = self._ensure_list(item.get("reasons"))
+
+            row = {
+                "ticker": ticker,
+                "tradingview_url": f"https://www.tradingview.com/chart/rDOZV85G/?symbol=NYSE%3A{ticker}",
+                "latest_close": item.get("latest_close"),
+                "score": item.get("total_score"),
+                "setup_quality_score": item.get("setup_quality_score"),
+                "entry_timing_score": item.get("entry_timing_score"),
+                "reward_risk_ratio": item.get("reward_risk_ratio"),
+                "classification": item.get("classification", ""),
+                "buyability_status": item.get("buyability_status", "AVOID"),
+                "buyability_reason": item.get("buyability_reason", ""),
+                "sector": item.get("sector", "Unknown"),
+                "suggested_entry": plan.get("suggested_entry"),
+                "suggested_stop_loss": plan.get("suggested_stop_loss"),
+                "suggested_first_target": plan.get("suggested_first_target"),
+                "plan_reward_risk_ratio": plan.get("reward_risk_ratio"),
+                "reasons": reasons,
+                "component_scores": components,
+                "penalties": self._ensure_dict(item.get("penalties")),
+                "signal_flags": self._ensure_dict(item.get("signal_flags")),
+                "feature_snapshot": features,
+                "momentum_score": float(components.get("momentum", 0.0) or 0.0),
+                "relative_strength_score": float(components.get("relative_strength", 0.0) or 0.0),
+                "distance_from_highs": float(features.get("dist_from_52w_high", 0.0) or 0.0),
+            }
+            row["reasons_display"] = self._readable_reasons(row["reasons"], lang)
+            row["score_bars"] = self._score_bars(components, lang)
+            row["visual_signals"] = self._visual_signals(row, lang)
+            row["explanation"] = self._explanation(row, lang)
+            rows.append(row)
+
+        rows = self._sort_rows(rows, sort_by)
+        return {
+            "run_id": run_id,
+            "generated_at": generated_at,
+            "diagnostics": diagnostics,
+            "backtest": backtest,
+            "rows": rows,
+            "market_widgets": self._load_market_widgets(widget_tf=widget_tf),
+            "widget_tf": widget_tf,
+        }
+
+    @staticmethod
+    def _ensure_dict(value: object) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    @staticmethod
+    def _ensure_list(value: object) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return parsed
+            except json.JSONDecodeError:
+                return []
+        return []
 
     @staticmethod
     def _readable_reasons(reasons: list[str], lang: str) -> list[str]:

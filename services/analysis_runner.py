@@ -19,6 +19,7 @@ from portfolio.simulator import PortfolioSimulator
 from scoring.stock_scorer import StockScorer
 from storage.csv_repository import AnalysisResultCsvRepository
 from storage.json_repository import AnalysisResultJsonRepository
+from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
 @dataclass
@@ -34,6 +35,7 @@ class AnalysisRunner:
     simulator: PortfolioSimulator
     csv_repository: AnalysisResultCsvRepository
     json_repository: AnalysisResultJsonRepository
+    supabase_repository: SupabasePostgresRepository | None = None
     benchmark_symbol: str = "SPY"
 
     def __post_init__(self) -> None:
@@ -140,6 +142,11 @@ class AnalysisRunner:
 
         self.csv_repository.save_portfolio_snapshots(snapshots, run_id=run_id)
         self.json_repository.save_run_artifacts(result)
+        if self.supabase_repository is not None and self.supabase_repository.enabled:
+            try:
+                self.supabase_repository.save_analysis_batch(result)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.exception("Failed saving run to Supabase: %s", exc)
 
         return result
 

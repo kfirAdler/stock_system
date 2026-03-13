@@ -50,6 +50,8 @@ class AppSettings:
     stooq_interval: str = "d"
     cache_enabled: bool = True
     force_refresh: bool = False
+    save_to_supabase: bool = field(default_factory=lambda: os.environ.get("SAVE_TO_SUPABASE", "false").lower() == "true")
+    supabase_db_url: str | None = field(default_factory=lambda: os.environ.get("SUPABASE_DB_URL"))
     min_history_rows: int = 120
     rolling_volume_window: int = 20
     ma_short_window: int = 20
