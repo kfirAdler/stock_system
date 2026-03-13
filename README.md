@@ -79,6 +79,7 @@ Set environment variables:
 
 - `FLASK_SECRET_KEY` = any strong random value
 - `OUTPUT_DIR` = `/var/data/output` (recommended when using Render Disk)
+- `DATA_PROVIDER_MODE` = `auto` (recommended), `stooq`, or `yahoo`
 - `SAVE_TO_SUPABASE` = `true` (if you want DB persistence)
 - `SUPABASE_DB_URL` = Supabase Postgres connection URL
 

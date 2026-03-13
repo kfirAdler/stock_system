@@ -4,9 +4,11 @@ import logging
 
 from config.settings import AppSettings
 from config.universe_loader import TickerUniverseLoader
+from data.fallback_provider import FallbackMarketDataProvider
 from data.market_data_service import MarketDataService
 from data.stooq_provider import StooqDataProvider
 from data.symbol_normalizer import SymbolNormalizer
+from data.yahoo_provider import YahooFinanceDataProvider
 from features.feature_calculator import FeatureCalculator
 from features.feature_validator import FeatureValidator
 from planning.trade_planner import TradePlanner
@@ -24,7 +26,14 @@ from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 def build_runner(settings: AppSettings) -> AnalysisRunner:
     normalizer = SymbolNormalizer()
-    provider = StooqDataProvider(normalizer=normalizer, interval=settings.stooq_interval)
+    stooq_provider = StooqDataProvider(normalizer=normalizer, interval=settings.stooq_interval)
+    yahoo_provider = YahooFinanceDataProvider()
+    if settings.data_provider_mode == "stooq":
+        provider = stooq_provider
+    elif settings.data_provider_mode == "yahoo":
+        provider = yahoo_provider
+    else:
+        provider = FallbackMarketDataProvider(providers=[stooq_provider, yahoo_provider])
     market_data_service = MarketDataService(
         provider=provider,
         raw_data_dir=settings.raw_data_dir,

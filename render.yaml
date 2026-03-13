@@ -12,6 +12,8 @@ services:
         generateValue: true
       - key: OUTPUT_DIR
         value: /var/data/output
+      - key: DATA_PROVIDER_MODE
+        value: auto
       - key: SAVE_TO_SUPABASE
         value: "false"
     disk:

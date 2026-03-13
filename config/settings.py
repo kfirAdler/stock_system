@@ -47,6 +47,7 @@ class AppSettings:
     universe_source: str = "sp500"
     universe_size: int = 500
     sp500_constituents_url: str = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
+    data_provider_mode: str = field(default_factory=lambda: os.environ.get("DATA_PROVIDER_MODE", "auto").lower())
     stooq_interval: str = "d"
     cache_enabled: bool = True
     force_refresh: bool = False
