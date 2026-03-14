@@ -25,6 +25,14 @@ class SupabasePostgresRepository:
     def enabled(self) -> bool:
         return bool(self.db_url and self.db_url.strip())
 
+    def healthcheck(self) -> None:
+        """Raise if DB cannot be reached."""
+        if not self.enabled:
+            raise RuntimeError("Supabase repository is disabled")
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select 1")
+
     def save_analysis_batch(self, batch: AnalysisBatchResult) -> None:
         if not self.enabled:
             return

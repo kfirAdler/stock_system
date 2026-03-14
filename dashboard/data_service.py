@@ -24,12 +24,9 @@ class DashboardDataService:
 
     def latest_run_id(self) -> str | None:
         if self.supabase_repository is not None and self.supabase_repository.enabled:
-            try:
-                payload = self.supabase_repository.load_latest_run_payload()
-                if payload is not None:
-                    return str(payload.get("run_id") or "latest")
-            except Exception:  # noqa: BLE001
-                pass
+            payload = self.supabase_repository.load_latest_run_payload()
+            if payload is not None:
+                return str(payload.get("run_id") or "latest")
 
         analyses_dir = self.settings.analyses_dir
         if not analyses_dir.exists():
@@ -57,12 +54,10 @@ class DashboardDataService:
         widget_tf: str = "d",
     ) -> dict[str, Any] | None:
         if self.supabase_repository is not None and self.supabase_repository.enabled:
-            try:
-                payload = self.supabase_repository.load_latest_run_payload()
-                if payload is not None:
-                    return self._build_view_from_db_payload(payload=payload, lang=lang, sort_by=sort_by, widget_tf=widget_tf)
-            except Exception:  # noqa: BLE001
-                pass
+            payload = self.supabase_repository.load_latest_run_payload()
+            if payload is not None:
+                return self._build_view_from_db_payload(payload=payload, lang=lang, sort_by=sort_by, widget_tf=widget_tf)
+            raise RuntimeError("Supabase mode enabled but no run payload found in database")
 
         analysis_file = self.settings.analyses_dir / run_id / "current_analysis.json"
         diagnostics_file = self.settings.analyses_dir / run_id / "run_diagnostics.json"

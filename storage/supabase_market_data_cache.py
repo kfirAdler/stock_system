@@ -21,6 +21,14 @@ class SupabaseMarketDataCache:
     def enabled(self) -> bool:
         return bool(self.db_url and self.db_url.strip())
 
+    def healthcheck(self) -> None:
+        """Raise if DB cannot be reached."""
+        if not self.enabled:
+            raise RuntimeError("Supabase market cache is disabled")
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select 1")
+
     def load_history(self, ticker: str) -> pd.DataFrame:
         if not self.enabled:
             return pd.DataFrame()
@@ -130,4 +138,3 @@ class SupabaseMarketDataCache:
                 )
             conn.commit()
         self._schema_ready = True
-

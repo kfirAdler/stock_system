@@ -78,4 +78,10 @@ When `SAVE_TO_SUPABASE=true` and `SUPABASE_DB_URL` is set:
 - raw OHLCV cache is saved in Supabase table `market_raw_data`
 - scanner runs are saved to Supabase tables
 - simulator actions and equity points are saved to Supabase
-- dashboard loads latest run from Supabase first (falls back to local JSON if unavailable)
+- dashboard loads latest run from Supabase
+
+In strict Supabase mode (`SAVE_TO_SUPABASE=true`):
+
+- startup fails fast if DB is unreachable
+- local analysis artifact files are not written
+- raw data file-cache fallback is disabled

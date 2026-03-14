@@ -37,6 +37,7 @@ class AnalysisRunner:
     json_repository: AnalysisResultJsonRepository
     supabase_repository: SupabasePostgresRepository | None = None
     benchmark_symbol: str = "SPY"
+    persist_local_files: bool = True
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
@@ -140,13 +141,11 @@ class AnalysisRunner:
             backtest_summary=backtest_summary,
         )
 
-        self.csv_repository.save_portfolio_snapshots(snapshots, run_id=run_id)
-        self.json_repository.save_run_artifacts(result)
+        if self.persist_local_files:
+            self.csv_repository.save_portfolio_snapshots(snapshots, run_id=run_id)
+            self.json_repository.save_run_artifacts(result)
         if self.supabase_repository is not None and self.supabase_repository.enabled:
-            try:
-                self.supabase_repository.save_analysis_batch(result)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.exception("Failed saving run to Supabase: %s", exc)
+            self.supabase_repository.save_analysis_batch(result)
 
         return result
 

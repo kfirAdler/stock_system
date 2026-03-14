@@ -199,6 +199,8 @@ def create_app() -> Flask:
     supabase_repository = SupabasePostgresRepository(
         db_url=settings.supabase_db_url if settings.save_to_supabase else None,
     )
+    if settings.save_to_supabase:
+        supabase_repository.healthcheck()
     data_service = DashboardDataService(settings=settings, supabase_repository=supabase_repository)
     simulator_service = DashboardSimulatorService(
         settings=settings,

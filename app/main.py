@@ -34,15 +34,26 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         provider = yahoo_provider
     else:
         provider = FallbackMarketDataProvider(providers=[stooq_provider, yahoo_provider])
+    supabase_market_cache = SupabaseMarketDataCache(
+        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+    )
+    supabase_repository = SupabasePostgresRepository(
+        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+    )
+
+    if settings.save_to_supabase:
+        # Fail fast when Supabase is required.
+        supabase_market_cache.healthcheck()
+        supabase_repository.healthcheck()
+
     market_data_service = MarketDataService(
         provider=provider,
         raw_data_dir=settings.raw_data_dir,
         min_history_rows=settings.min_history_rows,
         cache_enabled=settings.cache_enabled,
         force_refresh=settings.force_refresh,
-        supabase_cache=SupabaseMarketDataCache(
-            db_url=settings.supabase_db_url if settings.save_to_supabase else None,
-        ),
+        supabase_cache=supabase_market_cache,
+        local_file_cache_enabled=not settings.save_to_supabase,
     )
 
     scorer = StockScorer(
@@ -75,10 +86,9 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
             analyses_dir=settings.analyses_dir,
             portfolios_dir=settings.portfolios_dir,
         ),
-        supabase_repository=SupabasePostgresRepository(
-            db_url=settings.supabase_db_url if settings.save_to_supabase else None,
-        ),
+        supabase_repository=supabase_repository,
         benchmark_symbol=settings.benchmark_symbol,
+        persist_local_files=not settings.save_to_supabase,
     )
 
 

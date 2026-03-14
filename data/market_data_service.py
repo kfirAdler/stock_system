@@ -21,15 +21,19 @@ class MarketDataService:
     cache_enabled: bool = True
     force_refresh: bool = False
     supabase_cache: SupabaseMarketDataCache | None = None
+    local_file_cache_enabled: bool = True
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
-        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        if self.local_file_cache_enabled:
+            self.raw_data_dir.mkdir(parents=True, exist_ok=True)
 
     def get_history(self, ticker: str, use_cache: bool = True) -> pd.DataFrame:
         cache_file = self.raw_data_dir / f"{ticker.upper()}.csv"
         allow_cache = self.cache_enabled and use_cache
         use_supabase_cache = self.supabase_cache is not None and self.supabase_cache.enabled
+        if not use_supabase_cache and not self.local_file_cache_enabled:
+            raise RuntimeError("No cache backend configured. Enable Supabase or local file cache.")
 
         if allow_cache and not self.force_refresh:
             cached = self.supabase_cache.load_history(ticker) if use_supabase_cache else self._read_cached(cache_file)
@@ -68,6 +72,8 @@ class MarketDataService:
                 if use_supabase_cache:
                     self.supabase_cache.save_history(ticker=ticker, frame=validated_merged)
                 else:
+                    if not self.local_file_cache_enabled:
+                        raise RuntimeError("Local file cache is disabled; cannot persist raw data")
                     validated_merged.to_csv(cache_file)
                 self._logger.info("Merged and saved updated raw data for %s", ticker)
             return validated_merged
@@ -89,6 +95,8 @@ class MarketDataService:
                 self.supabase_cache.save_history(ticker=ticker, frame=validated)
                 self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
             else:
+                if not self.local_file_cache_enabled:
+                    raise RuntimeError("Local file cache is disabled; cannot persist raw data")
                 validated.to_csv(cache_file)
                 self._logger.info("Saved %s rows to file cache for %s", len(validated), ticker)
         return validated
