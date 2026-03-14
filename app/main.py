@@ -99,6 +99,11 @@ def main() -> None:
     )
 
     settings = AppSettings()
+    logging.getLogger("AppMain").info(
+        "Boot settings: save_to_supabase=%s output_dir=%s",
+        settings.save_to_supabase,
+        settings.output_dir,
+    )
     settings.ensure_directories()
 
     runner = build_runner(settings)

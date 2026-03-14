@@ -195,6 +195,11 @@ def create_app() -> Flask:
     )
 
     settings = AppSettings()
+    logging.getLogger("DashboardApp").info(
+        "Boot settings: save_to_supabase=%s output_dir=%s",
+        settings.save_to_supabase,
+        settings.output_dir,
+    )
     settings.ensure_directories()
     supabase_repository = SupabasePostgresRepository(
         db_url=settings.supabase_db_url if settings.save_to_supabase else None,

@@ -6,6 +6,14 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable with tolerant truthy values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 @dataclass(frozen=True)
 class ScoringThresholds:
     """Thresholds used to classify scored stocks."""
@@ -49,9 +57,9 @@ class AppSettings:
     sp500_constituents_url: str = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
     data_provider_mode: str = field(default_factory=lambda: os.environ.get("DATA_PROVIDER_MODE", "auto").lower())
     stooq_interval: str = "d"
-    cache_enabled: bool = True
-    force_refresh: bool = False
-    save_to_supabase: bool = field(default_factory=lambda: os.environ.get("SAVE_TO_SUPABASE", "false").lower() == "true")
+    cache_enabled: bool = field(default_factory=lambda: _env_bool("CACHE_ENABLED", True))
+    force_refresh: bool = field(default_factory=lambda: _env_bool("FORCE_REFRESH", False))
+    save_to_supabase: bool = field(default_factory=lambda: _env_bool("SAVE_TO_SUPABASE", False))
     supabase_db_url: str | None = field(default_factory=lambda: os.environ.get("SUPABASE_DB_URL"))
     min_history_rows: int = 120
     rolling_volume_window: int = 20
@@ -77,6 +85,9 @@ class AppSettings:
 
     def ensure_directories(self) -> None:
         """Create runtime directories if they do not already exist."""
+        if self.save_to_supabase:
+            # Strict Supabase mode: no local analysis/raw-data directory requirement.
+            return
         self.raw_data_dir.mkdir(parents=True, exist_ok=True)
         self.analyses_dir.mkdir(parents=True, exist_ok=True)
         self.portfolios_dir.mkdir(parents=True, exist_ok=True)
