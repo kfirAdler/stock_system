@@ -5,11 +5,11 @@ import os
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, render_template, request
 
-from app.main import build_runner
 from config.settings import AppSettings
 from dashboard.data_service import DashboardDataService
+from dashboard.scan_job_service import ScanJobService
 from dashboard.simulator_service import DashboardSimulatorService
 from storage.supabase_postgres_repository import SupabasePostgresRepository
 
@@ -19,6 +19,13 @@ def _texts(lang: str) -> dict[str, str]:
         "title": "Stock Scanner Dashboard",
         "run_again": "Run Again",
         "status": "Status",
+        "scan_job": "Scan Job",
+        "job_status": "Job Status",
+        "job_phase": "Phase",
+        "job_progress": "Progress",
+        "job_current_ticker": "Current Ticker",
+        "job_logs": "Live Logs",
+        "job_running_msg": "Job is already running",
         "filter": "Filter",
         "all": "All",
         "summary": "Latest Run Summary",
@@ -102,6 +109,13 @@ def _texts(lang: str) -> dict[str, str]:
         "title": "לוח סריקת מניות",
         "run_again": "הרץ שוב",
         "status": "סטטוס",
+        "scan_job": "משימת סריקה",
+        "job_status": "סטטוס משימה",
+        "job_phase": "שלב",
+        "job_progress": "התקדמות",
+        "job_current_ticker": "סימול נוכחי",
+        "job_logs": "לוגים חיים",
+        "job_running_msg": "המשימה כבר רצה",
         "filter": "סינון",
         "all": "הכל",
         "summary": "סיכום הריצה האחרונה",
@@ -207,6 +221,7 @@ def create_app() -> Flask:
     if settings.save_to_supabase:
         supabase_repository.healthcheck()
     data_service = DashboardDataService(settings=settings, supabase_repository=supabase_repository)
+    scan_job_service = ScanJobService(settings=settings)
     simulator_service = DashboardSimulatorService(
         settings=settings,
         data_service=data_service,
@@ -251,8 +266,9 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index() -> str:
-        status = session.get("run_status", "idle")
-        error_message = session.pop("run_error", None)
+        job_status = scan_job_service.status()
+        status = job_status.get("status", "idle")
+        error_message = job_status.get("error")
 
         lang = request.args.get("lang", "en").lower()
         if lang not in {"en", "he"}:
@@ -278,6 +294,7 @@ def create_app() -> Flask:
             dir="rtl" if lang == "he" else "ltr",
             status=status,
             error_message=error_message,
+            job_status=job_status,
             selected_classification=selected_classification,
             sort_by=sort_by,
             widget_tf=widget_tf,
@@ -309,32 +326,23 @@ def create_app() -> Flask:
         return jsonify({"status": "ok"}), 200
 
     @app.post("/run-again")
-    def run_again() -> str:
-        lang = request.form.get("lang", "en")
-        selected_classification = request.form.get("classification", "ALL")
-        sort_by = request.form.get("sort_by", "score")
-        widget_tf = request.form.get("widget_tf", "d")
-
-        session["run_status"] = "running"
-        try:
-            runner = build_runner(settings)
-            result = runner.run()
-            session["run_status"] = "completed"
-            session["last_run_id"] = result.run_id
-        except Exception as exc:  # noqa: BLE001
-            app.logger.exception("Scanner rerun failed")
-            session["run_status"] = "failed"
-            session["run_error"] = str(exc)
-
-        return redirect(
-            url_for(
-                "index",
-                lang=lang,
-                classification=selected_classification,
-                sort_by=sort_by,
-                widget_tf=widget_tf,
-            )
+    def run_again() -> tuple[dict, int]:
+        started, message = scan_job_service.start()
+        code = 202 if started else 409
+        return (
+            jsonify(
+                {
+                    "started": started,
+                    "message": message,
+                    "status": scan_job_service.status(),
+                }
+            ),
+            code,
         )
+
+    @app.get("/run-status")
+    def run_status() -> tuple[dict, int]:
+        return jsonify(scan_job_service.status()), 200
 
     return app
 

@@ -89,6 +89,7 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         supabase_repository=supabase_repository,
         benchmark_symbol=settings.benchmark_symbol,
         persist_local_files=not settings.save_to_supabase,
+        max_workers=settings.scan_workers,
     )
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -80,10 +82,39 @@ class MarketDataService:
 
         return self._fetch_and_cache_full(ticker, cache_file)
 
-    def get_histories(self, tickers: list[str], use_cache: bool = True) -> dict[str, pd.DataFrame]:
+    def get_histories(
+        self,
+        tickers: list[str],
+        use_cache: bool = True,
+        max_workers: int = 1,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> dict[str, pd.DataFrame]:
         histories: dict[str, pd.DataFrame] = {}
-        for ticker in tickers:
-            histories[ticker] = self.get_history(ticker=ticker, use_cache=use_cache)
+        total = len(tickers)
+        if total == 0:
+            return histories
+
+        worker_count = max(1, min(max_workers, total))
+        if worker_count == 1:
+            for idx, ticker in enumerate(tickers, start=1):
+                histories[ticker] = self.get_history(ticker=ticker, use_cache=use_cache)
+                if progress_callback is not None:
+                    progress_callback(idx, total, ticker)
+            return histories
+
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="md") as executor:
+            futures = {executor.submit(self.get_history, ticker=ticker, use_cache=use_cache): ticker for ticker in tickers}
+            completed = 0
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    histories[ticker] = future.result()
+                except Exception:  # noqa: BLE001
+                    self._logger.exception("Failed fetching history for %s", ticker)
+                    histories[ticker] = pd.DataFrame()
+                completed += 1
+                if progress_callback is not None:
+                    progress_callback(completed, total, ticker)
         return histories
 
     def _fetch_and_cache_full(self, ticker: str, cache_file: Path) -> pd.DataFrame:

@@ -14,6 +14,17 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    """Parse an integer environment variable with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class ScoringThresholds:
     """Thresholds used to classify scored stocks."""
@@ -56,6 +67,7 @@ class AppSettings:
     universe_size: int = 500
     sp500_constituents_url: str = "https://datahub.io/core/s-and-p-500-companies/r/constituents.csv"
     data_provider_mode: str = field(default_factory=lambda: os.environ.get("DATA_PROVIDER_MODE", "auto").lower())
+    scan_workers: int = field(default_factory=lambda: max(1, _env_int("SCAN_WORKERS", 5)))
     stooq_interval: str = "d"
     cache_enabled: bool = field(default_factory=lambda: _env_bool("CACHE_ENABLED", True))
     force_refresh: bool = field(default_factory=lambda: _env_bool("FORCE_REFRESH", False))

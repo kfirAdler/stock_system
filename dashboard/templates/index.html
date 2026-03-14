@@ -37,7 +37,7 @@
           <input type="hidden" name="classification" value="{{ selected_classification }}" />
           <input type="hidden" name="sort_by" value="{{ sort_by }}" />
           <input type="hidden" name="widget_tf" value="{{ widget_tf }}" />
-          <button type="submit" class="btn">{{ t.run_again }}</button>
+          <button type="submit" class="btn" id="run-again-btn">{{ t.run_again }}</button>
         </form>
 
         <form method="get" action="{{ url_for('index') }}" class="filter-form">
@@ -69,6 +69,32 @@
 
           <button type="submit" class="btn secondary">{{ t.apply }}</button>
         </form>
+      </section>
+
+      <section class="panel" id="job-panel">
+        <h3 class="panel-title">{{ t.scan_job }}</h3>
+        <div class="summary-grid">
+          <div><strong>{{ t.job_status }}:</strong> <span id="job-status">{{ job_status.status|upper }}</span></div>
+          <div><strong>{{ t.job_phase }}:</strong> <span id="job-phase">{{ job_status.phase }}</span></div>
+          <div><strong>{{ t.job_progress }}:</strong> <span id="job-progress">{{ job_status.progress_current }}/{{ job_status.progress_total }}</span></div>
+          <div><strong>{{ t.job_current_ticker }}:</strong> <span id="job-current-ticker">{{ job_status.current_ticker or '-' }}</span></div>
+        </div>
+        {% set total = job_status.progress_total or 0 %}
+        {% set current = job_status.progress_current or 0 %}
+        {% set percent = ((current / total) * 100) if total > 0 else 0 %}
+        <div class="job-progress-wrap" aria-label="job-progress">
+          <div class="job-progress-track">
+            <div class="job-progress-fill" id="job-progress-fill" style="width: {{ percent|round(1) }}%;"></div>
+          </div>
+          <div class="job-progress-meta">
+            <span id="job-progress-percent">{{ percent|round(1) }}%</span>
+          </div>
+        </div>
+        <details id="job-logs-wrapper">
+          <summary>{{ t.job_logs }}</summary>
+          <pre id="job-logs" class="job-logs">{% for item in job_status.logs %}{{ item.time|et_time }} - {{ item.message }}
+{% endfor %}</pre>
+        </details>
       </section>
 
       {% if run and run.market_widgets %}
@@ -213,5 +239,90 @@
       </section>
       {% endif %}
     </main>
+    <script>
+      const runForm = document.getElementById("run-form");
+      const runBtn = document.getElementById("run-again-btn");
+      const jobStatusEl = document.getElementById("job-status");
+      const jobPhaseEl = document.getElementById("job-phase");
+      const jobProgressEl = document.getElementById("job-progress");
+      const jobProgressFillEl = document.getElementById("job-progress-fill");
+      const jobProgressPercentEl = document.getElementById("job-progress-percent");
+      const jobTickerEl = document.getElementById("job-current-ticker");
+      const jobLogsEl = document.getElementById("job-logs");
+      const headerStatus = document.querySelector(".status");
+      const jobRunningMessage = "{{ t.job_running_msg }}";
+      let lastSeenStatus = "{{ job_status.status }}";
+
+      function renderJobStatus(status) {
+        const current = Number(status.progress_current || 0);
+        const total = Number(status.progress_total || 0);
+        const progressText = `${current}/${total}`;
+        const pct = total > 0 ? Math.min(100, Math.max(0, (current / total) * 100)) : 0;
+        jobStatusEl.textContent = String(status.status || "idle").toUpperCase();
+        jobPhaseEl.textContent = status.phase || "-";
+        jobProgressEl.textContent = progressText;
+        if (jobProgressFillEl) {
+          jobProgressFillEl.style.width = `${pct.toFixed(1)}%`;
+        }
+        if (jobProgressPercentEl) {
+          jobProgressPercentEl.textContent = `${pct.toFixed(1)}%`;
+        }
+        jobTickerEl.textContent = status.current_ticker || "-";
+        if (headerStatus) {
+          headerStatus.className = `status status-${status.status || "idle"}`;
+          headerStatus.textContent = `{{ t.status }}: ${String(status.status || "idle").toUpperCase()}`;
+        }
+        if (runBtn) {
+          runBtn.disabled = status.status === "running";
+        }
+        if (jobLogsEl && Array.isArray(status.logs)) {
+          const text = status.logs
+            .map((item) => `${item.time || ""} - ${item.message || ""}`)
+            .join("\n");
+          jobLogsEl.textContent = text;
+          jobLogsEl.scrollTop = jobLogsEl.scrollHeight;
+        }
+      }
+
+      async function pollRunStatus() {
+        try {
+          const response = await fetch("{{ url_for('run_status') }}", { cache: "no-store" });
+          if (!response.ok) {
+            return;
+          }
+          const status = await response.json();
+          renderJobStatus(status);
+          if (
+            lastSeenStatus === "running" &&
+            (status.status === "completed" || status.status === "failed")
+          ) {
+            window.location.reload();
+          }
+          lastSeenStatus = status.status || lastSeenStatus;
+        } catch (err) {
+          console.error("Failed polling run status", err);
+        }
+      }
+
+      if (runForm) {
+        runForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          runBtn.disabled = true;
+          try {
+            const response = await fetch(runForm.action, { method: "POST" });
+            const payload = await response.json();
+            renderJobStatus(payload.status || {});
+            lastSeenStatus = (payload.status && payload.status.status) || lastSeenStatus;
+            if (response.status === 409) {
+              alert(jobRunningMessage);
+            }
+          } catch (err) {
+            console.error("Failed to start scan", err);
+          }
+        });
+      }
+
+      setInterval(pollRunStatus, 2000);
+    </script>
   </body>
 </html>

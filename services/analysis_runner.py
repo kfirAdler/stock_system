@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from collections import Counter
@@ -38,6 +39,9 @@ class AnalysisRunner:
     supabase_repository: SupabasePostgresRepository | None = None
     benchmark_symbol: str = "SPY"
     persist_local_files: bool = True
+    max_workers: int = 1
+    progress_callback: Callable[[str, int, int, str], None] | None = None
+    log_callback: Callable[[str], None] | None = None
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
@@ -45,10 +49,17 @@ class AnalysisRunner:
     def run(self) -> AnalysisBatchResult:
         tickers = self.universe_loader.load()
         self._logger.info("Loaded %s tickers", len(tickers))
+        self._emit_log(f"Loaded {len(tickers)} tickers")
         sector_by_ticker = {ticker: self.universe_loader.sector_for(ticker) for ticker in tickers}
 
+        self._emit_log("Loading benchmark history")
         benchmark = self.market_data_service.get_history(self.benchmark_symbol)
-        histories = self.market_data_service.get_histories(tickers=tickers)
+        self._emit_log(f"Fetching historical data with {self.max_workers} worker(s)")
+        histories = self.market_data_service.get_histories(
+            tickers=tickers,
+            max_workers=self.max_workers,
+            progress_callback=self._on_history_progress,
+        )
 
         analyses: list[StockAnalysis] = []
         feature_histories: dict[str, pd.DataFrame] = {}
@@ -113,6 +124,7 @@ class AnalysisRunner:
                     },
                 )
             )
+            self._on_analysis_progress(len(analyses), len(feature_histories), ticker)
 
         analyses.sort(
             key=lambda item: (
@@ -146,8 +158,21 @@ class AnalysisRunner:
             self.json_repository.save_run_artifacts(result)
         if self.supabase_repository is not None and self.supabase_repository.enabled:
             self.supabase_repository.save_analysis_batch(result)
+        self._emit_log(f"Run completed. run_id={run_id} analyses={len(analyses)}")
 
         return result
+
+    def _on_history_progress(self, current: int, total: int, ticker: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback("history", current, total, ticker)
+
+    def _on_analysis_progress(self, current: int, total: int, ticker: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback("analysis", current, total, ticker)
+
+    def _emit_log(self, message: str) -> None:
+        if self.log_callback is not None:
+            self.log_callback(message)
 
     def _build_diagnostics(self, analyses: list[StockAnalysis]) -> RunDiagnostics:
         buy_count = len([item for item in analyses if item.classification is SignalClassification.BUY])
