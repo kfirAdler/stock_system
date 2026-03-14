@@ -74,6 +74,10 @@ class AppSettings:
     save_to_supabase: bool = field(default_factory=lambda: _env_bool("SAVE_TO_SUPABASE", False))
     supabase_db_url: str | None = field(default_factory=lambda: os.environ.get("SUPABASE_DB_URL"))
     min_history_rows: int = 120
+    history_tail_rows: int = field(default_factory=lambda: max(120, _env_int("HISTORY_TAIL_ROWS", 1200)))
+    history_fetch_lookback_days: int = field(
+        default_factory=lambda: max(365, _env_int("HISTORY_FETCH_LOOKBACK_DAYS", 1800))
+    )
     rolling_volume_window: int = 20
     ma_short_window: int = 20
     ma_long_window: int = 50

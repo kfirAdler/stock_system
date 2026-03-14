@@ -20,6 +20,8 @@ class MarketDataService:
     provider: MarketDataProvider
     raw_data_dir: Path
     min_history_rows: int = 120
+    history_tail_rows: int = 1200
+    history_fetch_lookback_days: int = 1800
     cache_enabled: bool = True
     force_refresh: bool = False
     supabase_cache: SupabaseMarketDataCache | None = None
@@ -36,6 +38,8 @@ class MarketDataService:
         use_supabase_cache = self.supabase_cache is not None and self.supabase_cache.enabled
         if not use_supabase_cache and not self.local_file_cache_enabled:
             raise RuntimeError("No cache backend configured. Enable Supabase or local file cache.")
+        if use_supabase_cache:
+            return self._get_history_supabase(ticker=ticker, allow_cache=allow_cache)
 
         if allow_cache and not self.force_refresh:
             cached = self.supabase_cache.load_history(ticker) if use_supabase_cache else self._read_cached(cache_file)
@@ -50,7 +54,7 @@ class MarketDataService:
             last_complete_date = date.today() - timedelta(days=1)
             if last_cached_date >= last_complete_date:
                 self._logger.info("Cache up to date for %s through %s", ticker, last_cached_date)
-                return self._validate(validated_cached, ticker)
+                return self._trim_for_analysis(self._validate(validated_cached, ticker), ticker)
 
             incremental_start = last_cached_date + timedelta(days=1)
             self._logger.info(
@@ -66,7 +70,7 @@ class MarketDataService:
             )
             if incremental.empty:
                 self._logger.info("No new rows returned for %s", ticker)
-                return self._validate(validated_cached, ticker)
+                return self._trim_for_analysis(self._validate(validated_cached, ticker), ticker)
 
             merged = self._merge_frames(validated_cached, incremental)
             validated_merged = self._validate(merged, ticker)
@@ -78,9 +82,81 @@ class MarketDataService:
                         raise RuntimeError("Local file cache is disabled; cannot persist raw data")
                     validated_merged.to_csv(cache_file)
                 self._logger.info("Merged and saved updated raw data for %s", ticker)
-            return validated_merged
+            return self._trim_for_analysis(validated_merged, ticker)
 
         return self._fetch_and_cache_full(ticker, cache_file)
+
+    def _get_history_supabase(self, ticker: str, allow_cache: bool) -> pd.DataFrame:
+        if self.supabase_cache is None:
+            raise RuntimeError("Supabase cache is not configured")
+
+        if not allow_cache or self.force_refresh:
+            self._logger.info("Force refresh for %s (bounded lookback window)", ticker)
+            fetched = self.provider.fetch_history(
+                ticker=ticker,
+                start_date=date.today() - timedelta(days=self.history_fetch_lookback_days),
+                end_date=date.today(),
+            )
+            validated = self._validate(fetched, ticker)
+            if not validated.empty:
+                self.supabase_cache.save_history(ticker=ticker, frame=validated)
+                self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
+            return self._trim_for_analysis(validated, ticker)
+
+        last_cached_date = self.supabase_cache.latest_trade_date(ticker)
+        last_complete_date = date.today() - timedelta(days=1)
+        if last_cached_date is None:
+            self._logger.info("No Supabase cache for %s, fetching bounded history", ticker)
+            fetched = self.provider.fetch_history(
+                ticker=ticker,
+                start_date=date.today() - timedelta(days=self.history_fetch_lookback_days),
+                end_date=date.today(),
+            )
+            validated = self._validate(fetched, ticker)
+            if not validated.empty:
+                self.supabase_cache.save_history(ticker=ticker, frame=validated)
+                self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
+            return self._trim_for_analysis(validated, ticker)
+
+        if last_cached_date < last_complete_date:
+            incremental_start = last_cached_date + timedelta(days=1)
+            self._logger.info(
+                "Fetching incremental data for %s from %s to %s",
+                ticker,
+                incremental_start,
+                date.today(),
+            )
+            incremental = self.provider.fetch_history(
+                ticker=ticker,
+                start_date=incremental_start,
+                end_date=date.today(),
+            )
+            validated_incremental = self._validate(incremental, ticker, allow_short=True)
+            if validated_incremental.empty:
+                self._logger.info("No new rows returned for %s", ticker)
+            else:
+                self.supabase_cache.save_history(ticker=ticker, frame=validated_incremental)
+                self._logger.info("Merged and saved updated raw data for %s", ticker)
+
+        recent_limit = max(self.min_history_rows, self.history_tail_rows)
+        cached_recent = self.supabase_cache.load_recent_history(ticker=ticker, limit_rows=recent_limit)
+        validated_cached = self._validate(cached_recent, ticker)
+        if validated_cached.empty:
+            self._logger.info("Recent cache invalid for %s, fetching bounded history", ticker)
+            fetched = self.provider.fetch_history(
+                ticker=ticker,
+                start_date=date.today() - timedelta(days=self.history_fetch_lookback_days),
+                end_date=date.today(),
+            )
+            validated = self._validate(fetched, ticker)
+            if not validated.empty:
+                self.supabase_cache.save_history(ticker=ticker, frame=validated)
+                self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
+            return self._trim_for_analysis(validated, ticker)
+
+        self._logger.info("Loaded %s recent rows for %s from Supabase cache", len(validated_cached), ticker)
+        self._logger.info("Cache up to date for %s through %s", ticker, validated_cached.index.max().date())
+        return self._trim_for_analysis(validated_cached, ticker)
 
     def get_histories(
         self,
@@ -130,7 +206,7 @@ class MarketDataService:
                     raise RuntimeError("Local file cache is disabled; cannot persist raw data")
                 validated.to_csv(cache_file)
                 self._logger.info("Saved %s rows to file cache for %s", len(validated), ticker)
-        return validated
+        return self._trim_for_analysis(validated, ticker)
 
     def _read_cached(self, cache_file: Path) -> pd.DataFrame:
         try:
@@ -167,3 +243,19 @@ class MarketDataService:
             return pd.DataFrame()
 
         return validated
+
+    def _trim_for_analysis(self, frame: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        if frame.empty:
+            return frame
+        if self.history_tail_rows <= 0:
+            return frame
+        if len(frame) <= self.history_tail_rows:
+            return frame
+        trimmed = frame.tail(self.history_tail_rows)
+        self._logger.debug(
+            "Trimmed %s history from %s to %s rows for analysis",
+            ticker,
+            len(frame),
+            len(trimmed),
+        )
+        return trimmed

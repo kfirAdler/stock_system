@@ -50,6 +50,8 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         provider=provider,
         raw_data_dir=settings.raw_data_dir,
         min_history_rows=settings.min_history_rows,
+        history_tail_rows=settings.history_tail_rows,
+        history_fetch_lookback_days=settings.history_fetch_lookback_days,
         cache_enabled=settings.cache_enabled,
         force_refresh=settings.force_refresh,
         supabase_cache=supabase_market_cache,

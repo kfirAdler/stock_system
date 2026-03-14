@@ -30,20 +30,25 @@ class SupabaseMarketDataCache:
                 cur.execute("select 1")
 
     def load_history(self, ticker: str) -> pd.DataFrame:
+        return self.load_recent_history(ticker=ticker, limit_rows=None)
+
+    def load_recent_history(self, ticker: str, limit_rows: int | None) -> pd.DataFrame:
         if not self.enabled:
             return pd.DataFrame()
         self._ensure_schema()
+        query = """
+            select trade_date, open, high, low, close, volume
+            from market_raw_data
+            where ticker = %s
+            order by trade_date desc
+        """
+        params: tuple[object, ...] = (ticker.upper(),)
+        if limit_rows is not None and limit_rows > 0:
+            query += " limit %s"
+            params = (ticker.upper(), limit_rows)
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    select trade_date, open, high, low, close, volume
-                    from market_raw_data
-                    where ticker = %s
-                    order by trade_date asc
-                    """,
-                    (ticker.upper(),),
-                )
+                cur.execute(query, params)
                 rows = cur.fetchall()
 
         if not rows:
