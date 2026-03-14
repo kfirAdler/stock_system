@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 from pathlib import Path
@@ -46,12 +47,25 @@ class DashboardSimulatorService:
     )
 
     def __post_init__(self) -> None:
+        self._logger = logging.getLogger(self.__class__.__name__)
         self._tz = ZoneInfo("America/New_York")
+        self._db_mode = bool(
+            self.settings.save_to_supabase and self.supabase_repository is not None and self.supabase_repository.enabled
+        )
+        if self._db_mode:
+            self._dir = None
+            self._state_file = None
+            self._actions_file = None
+            self._equity_file = None
+            self._logger.info("Simulator storage mode: Supabase")
+            return
+
         self._dir = self.settings.output_dir / "simulator"
         self._dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self._dir / "state.json"
         self._actions_file = self._dir / "actions.jsonl"
         self._equity_file = self._dir / "equity_curve.csv"
+        self._logger.info("Simulator storage mode: local files at %s", self._dir)
 
     def tick(self) -> dict[str, Any]:
         """Advance the simulator by one cycle using latest scanner outputs."""
@@ -332,6 +346,11 @@ class DashboardSimulatorService:
             "realized_pnl": round(float(state["realized_pnl"]), 2),
             "open_positions": len(open_positions),
         }
+        if self._db_mode:
+            if self.supabase_repository is not None and self.supabase_repository.enabled:
+                self.supabase_repository.save_simulator_equity(row)
+            return
+
         with self._equity_file.open("a", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row.keys()))
             writer.writerow(row)
@@ -339,6 +358,23 @@ class DashboardSimulatorService:
             self.supabase_repository.save_simulator_equity(row)
 
     def _seed_equity_if_needed(self, state: dict[str, Any], timestamp: datetime) -> None:
+        if self._db_mode:
+            if self.supabase_repository is None or not self.supabase_repository.enabled:
+                return
+            existing = self.supabase_repository.load_simulator_equity_curve(limit=1)
+            if existing:
+                return
+            row = {
+                "timestamp": timestamp.isoformat(),
+                "equity": round(self.config.initial_capital, 2),
+                "cash": round(self.config.initial_capital, 2),
+                "unrealized_pnl": 0.0,
+                "realized_pnl": 0.0,
+                "open_positions": 0,
+            }
+            self.supabase_repository.save_simulator_equity(row)
+            return
+
         if self._equity_file.exists() and self._equity_file.stat().st_size > 0:
             return
         row = {
@@ -355,6 +391,26 @@ class DashboardSimulatorService:
             writer.writerow(row)
 
     def _load_state(self) -> dict[str, Any]:
+        if self._db_mode:
+            if self.supabase_repository is not None and self.supabase_repository.enabled:
+                state = self.supabase_repository.load_simulator_state()
+                if isinstance(state, dict):
+                    state.setdefault("dedupe_keys", [])
+                    return state
+            now = datetime.now(self._tz)
+            state = {
+                "cash": self.config.initial_capital,
+                "realized_pnl": 0.0,
+                "open_positions": {},
+                "status": "idle",
+                "last_tick": now.isoformat(),
+                "last_run_id": None,
+                "dedupe_keys": [],
+            }
+            self._save_state(state)
+            self._seed_equity_if_needed(state=state, timestamp=now)
+            return state
+
         if self._state_file.exists():
             with self._state_file.open("r", encoding="utf-8") as handle:
                 state = json.load(handle)
@@ -377,6 +433,10 @@ class DashboardSimulatorService:
 
     def _save_state(self, state: dict[str, Any]) -> None:
         state["dedupe_keys"] = state.get("dedupe_keys", [])[-4000:]
+        if self._db_mode:
+            if self.supabase_repository is not None and self.supabase_repository.enabled:
+                self.supabase_repository.save_simulator_state(state)
+            return
         with self._state_file.open("w", encoding="utf-8") as handle:
             json.dump(state, handle, indent=2)
 
@@ -402,8 +462,9 @@ class DashboardSimulatorService:
             "cash_balance": round(float(state["cash"]), 2),
             "portfolio_value": round(portfolio_value, 2),
         }
-        with self._actions_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
+        if not self._db_mode:
+            with self._actions_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload) + "\n")
         if self.supabase_repository is not None and self.supabase_repository.enabled:
             enriched_payload = dict(payload)
             enriched_payload["action_display"] = self._ACTION_MESSAGES.get(action, action.replace("_", " ").title())
@@ -449,6 +510,18 @@ class DashboardSimulatorService:
         )
 
     def _load_recent_actions(self, limit: int = 180) -> list[dict[str, Any]]:
+        if self._db_mode:
+            if self.supabase_repository is None or not self.supabase_repository.enabled:
+                return []
+            actions: list[dict[str, Any]] = []
+            for payload in self.supabase_repository.load_recent_simulator_actions(limit=limit):
+                code = str(payload.get("action", ""))
+                payload["action_display"] = self._ACTION_MESSAGES.get(code, code.replace("_", " ").title())
+                payload["timestamp_display"] = self._format_et(payload.get("timestamp"))
+                payload["action_level"] = self._action_level(code)
+                actions.append(payload)
+            return actions
+
         if not self._actions_file.exists():
             return []
         with self._actions_file.open("r", encoding="utf-8") as handle:
@@ -467,6 +540,20 @@ class DashboardSimulatorService:
         return actions
 
     def _load_equity_curve(self, limit: int = 500) -> list[dict[str, Any]]:
+        if self._db_mode:
+            if self.supabase_repository is None or not self.supabase_repository.enabled:
+                return []
+            points: list[dict[str, Any]] = []
+            for row in self.supabase_repository.load_simulator_equity_curve(limit=limit):
+                points.append(
+                    {
+                        "timestamp": row["timestamp"],
+                        "timestamp_display": self._format_et(str(row["timestamp"])),
+                        "equity": float(row["equity"]),
+                    }
+                )
+            return points
+
         if not self._equity_file.exists():
             return []
 

@@ -20,6 +20,7 @@ class SupabasePostgresRepository:
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
+        self._sim_schema_ready = False
 
     @property
     def enabled(self) -> bool:
@@ -312,6 +313,7 @@ class SupabasePostgresRepository:
     def save_simulator_action(self, payload: dict[str, Any]) -> None:
         if not self.enabled:
             return
+        self._ensure_simulator_schema()
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -358,6 +360,7 @@ class SupabasePostgresRepository:
     def save_simulator_equity(self, payload: dict[str, Any]) -> None:
         if not self.enabled:
             return
+        self._ensure_simulator_schema()
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -391,3 +394,135 @@ class SupabasePostgresRepository:
                     },
                 )
             conn.commit()
+
+    def load_simulator_state(self) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+        self._ensure_simulator_schema()
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select payload
+                    from simulator_state
+                    where state_key = 'default'
+                    """
+                )
+                row = cur.fetchone()
+        return row["payload"] if row else None
+
+    def save_simulator_state(self, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        self._ensure_simulator_schema()
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into simulator_state (state_key, payload, updated_at)
+                    values ('default', %(payload)s::jsonb, now())
+                    on conflict (state_key) do update set
+                        payload = excluded.payload,
+                        updated_at = now()
+                    """,
+                    {"payload": json.dumps(payload, default=str)},
+                )
+            conn.commit()
+
+    def load_recent_simulator_actions(self, limit: int = 180) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        self._ensure_simulator_schema()
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select
+                        action_time as timestamp,
+                        ticker,
+                        action_code as action,
+                        quantity,
+                        execution_price,
+                        reason,
+                        cash_balance,
+                        portfolio_value
+                    from simulator_actions
+                    order by action_time desc
+                    limit %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        return [dict(row) for row in rows]
+
+    def load_simulator_equity_curve(self, limit: int = 500) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        self._ensure_simulator_schema()
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select
+                        point_time as timestamp,
+                        equity
+                    from simulator_equity_curve
+                    order by point_time desc
+                    limit %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        points = [dict(row) for row in rows]
+        points.reverse()
+        return points
+
+    def _ensure_simulator_schema(self) -> None:
+        if self._sim_schema_ready or not self.enabled:
+            return
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    create table if not exists simulator_state (
+                        state_key text primary key,
+                        payload jsonb not null,
+                        updated_at timestamptz not null default now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    create table if not exists simulator_actions (
+                        id bigserial primary key,
+                        action_time timestamptz not null,
+                        ticker text not null,
+                        action_code text not null,
+                        action_text text,
+                        quantity integer not null default 0,
+                        execution_price numeric(14,6) not null default 0,
+                        reason text,
+                        cash_balance numeric(18,4) not null default 0,
+                        portfolio_value numeric(18,4) not null default 0,
+                        payload jsonb not null,
+                        created_at timestamptz not null default now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    create table if not exists simulator_equity_curve (
+                        id bigserial primary key,
+                        point_time timestamptz not null,
+                        equity numeric(18,4) not null,
+                        cash numeric(18,4) not null,
+                        unrealized_pnl numeric(18,4) not null default 0,
+                        realized_pnl numeric(18,4) not null default 0,
+                        open_positions_count integer not null default 0,
+                        payload jsonb not null,
+                        created_at timestamptz not null default now()
+                    )
+                    """
+                )
+            conn.commit()
+        self._sim_schema_ready = True
