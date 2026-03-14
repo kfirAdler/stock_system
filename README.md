@@ -56,39 +56,20 @@ python -m dashboard.app
 
 Open `http://127.0.0.1:5000` in your browser.
 
-## Deploy On Render
+## Docker (EC2-ready)
 
-This project is ready for Render Web Service deployment.
+Build and run with Docker Compose:
 
-### Option A: Blueprint (recommended)
+```bash
+cp .env.example .env
+docker compose up --build -d
+```
 
-1. Push this repo to GitHub.
-2. In Render: `New` -> `Blueprint`.
-3. Select this repository.
-4. Render will use [`render.yaml`](/Users/kfiradler/projects/stock-api/stock_system/render.yaml).
+App endpoints:
 
-### Option B: Manual Web Service
-
-Use these settings:
-
-- Environment: `Python`
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `gunicorn dashboard.wsgi:app --workers 2 --threads 4 --timeout 120`
-
-Set environment variables:
-
-- `FLASK_SECRET_KEY` = any strong random value
-- `OUTPUT_DIR` = `/var/data/output` (recommended when using Render Disk)
-- `DATA_PROVIDER_MODE` = `auto` (recommended), `stooq`, or `yahoo`
-- `SAVE_TO_SUPABASE` = `true` (if you want DB persistence)
-- `SUPABASE_DB_URL` = Supabase Postgres connection URL
-
-### Persistent data
-
-The app writes cache/results under `OUTPUT_DIR`.
-On Render, attach a persistent disk (example mount path `/var/data`) and set:
-
-- `OUTPUT_DIR=/var/data/output`
+- `http://<server-ip>:5000/`
+- `http://<server-ip>:5000/simulator`
+- `http://<server-ip>:5000/health`
 
 ### Supabase mode
 

@@ -297,6 +297,10 @@ def create_app() -> Flask:
         snapshot = simulator_service.tick()
         return jsonify(snapshot), 200
 
+    @app.get("/health")
+    def health() -> tuple[dict, int]:
+        return jsonify({"status": "ok"}), 200
+
     @app.post("/run-again")
     def run_again() -> str:
         lang = request.form.get("lang", "en")
