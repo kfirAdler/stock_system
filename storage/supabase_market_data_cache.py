@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import psycopg
@@ -66,6 +66,8 @@ class SupabaseMarketDataCache:
             }
         )
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        for column in ["Open", "High", "Low", "Close", "Volume"]:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
         frame = frame.dropna().set_index("date").sort_index()
         frame.index.name = "date"
         return frame
@@ -116,6 +118,19 @@ class SupabaseMarketDataCache:
             with conn.cursor() as cur:
                 cur.execute(
                     "select max(trade_date) from market_raw_data where ticker = %s",
+                    (ticker.upper(),),
+                )
+                value = cur.fetchone()[0]
+        return value
+
+    def latest_inserted_at(self, ticker: str) -> datetime | None:
+        if not self.enabled:
+            return None
+        self._ensure_schema()
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select max(created_at) from market_raw_data where ticker = %s",
                     (ticker.upper(),),
                 )
                 value = cur.fetchone()[0]

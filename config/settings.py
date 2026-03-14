@@ -78,6 +78,9 @@ class AppSettings:
     history_fetch_lookback_days: int = field(
         default_factory=lambda: max(365, _env_int("HISTORY_FETCH_LOOKBACK_DAYS", 1800))
     )
+    min_refetch_interval_minutes: int = field(
+        default_factory=lambda: max(0, _env_int("MIN_REFETCH_INTERVAL_MINUTES", 30))
+    )
     rolling_volume_window: int = 20
     ma_short_window: int = 20
     ma_long_window: int = 50

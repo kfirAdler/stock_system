@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -22,6 +22,7 @@ class MarketDataService:
     min_history_rows: int = 120
     history_tail_rows: int = 1200
     history_fetch_lookback_days: int = 1800
+    min_refetch_interval_minutes: int = 30
     cache_enabled: bool = True
     force_refresh: bool = False
     supabase_cache: SupabaseMarketDataCache | None = None
@@ -118,6 +119,22 @@ class MarketDataService:
                 self._logger.info("Saved %s rows to Supabase cache for %s", len(validated), ticker)
             return self._trim_for_analysis(validated, ticker)
 
+        recent_inserted_at = self.supabase_cache.latest_inserted_at(ticker)
+        if recent_inserted_at is not None:
+            inserted_utc = recent_inserted_at.astimezone(UTC) if recent_inserted_at.tzinfo else recent_inserted_at.replace(tzinfo=UTC)
+            age = datetime.now(UTC) - inserted_utc
+            if age < timedelta(minutes=self.min_refetch_interval_minutes):
+                self._logger.info(
+                    "Skipping remote fetch for %s; cache was refreshed at %s (within %s minutes)",
+                    ticker,
+                    inserted_utc.isoformat(),
+                    self.min_refetch_interval_minutes,
+                )
+                recent_limit = max(self.min_history_rows, self.history_tail_rows)
+                cached_recent = self.supabase_cache.load_recent_history(ticker=ticker, limit_rows=recent_limit)
+                validated_cached = self._validate(cached_recent, ticker)
+                return self._trim_for_analysis(validated_cached, ticker)
+
         if last_cached_date < last_complete_date:
             incremental_start = last_cached_date + timedelta(days=1)
             self._logger.info(
@@ -164,6 +181,7 @@ class MarketDataService:
         use_cache: bool = True,
         max_workers: int = 1,
         progress_callback: Callable[[int, int, str], None] | None = None,
+        on_history: Callable[[str, pd.DataFrame], None] | None = None,
     ) -> dict[str, pd.DataFrame]:
         histories: dict[str, pd.DataFrame] = {}
         total = len(tickers)
@@ -173,7 +191,11 @@ class MarketDataService:
         worker_count = max(1, min(max_workers, total))
         if worker_count == 1:
             for idx, ticker in enumerate(tickers, start=1):
-                histories[ticker] = self.get_history(ticker=ticker, use_cache=use_cache)
+                history = self.get_history(ticker=ticker, use_cache=use_cache)
+                if on_history is None:
+                    histories[ticker] = history
+                else:
+                    on_history(ticker, history)
                 if progress_callback is not None:
                     progress_callback(idx, total, ticker)
             return histories
@@ -184,10 +206,17 @@ class MarketDataService:
             for future in as_completed(futures):
                 ticker = futures[future]
                 try:
-                    histories[ticker] = future.result()
+                    history = future.result()
+                    if on_history is None:
+                        histories[ticker] = history
+                    else:
+                        on_history(ticker, history)
                 except Exception:  # noqa: BLE001
                     self._logger.exception("Failed fetching history for %s", ticker)
-                    histories[ticker] = pd.DataFrame()
+                    if on_history is None:
+                        histories[ticker] = pd.DataFrame()
+                    else:
+                        on_history(ticker, pd.DataFrame())
                 completed += 1
                 if progress_callback is not None:
                     progress_callback(completed, total, ticker)
@@ -232,7 +261,10 @@ class MarketDataService:
             self._logger.warning("History for %s missing required columns", ticker)
             return pd.DataFrame()
 
-        validated = frame.sort_index()
+        validated = frame.sort_index().copy()
+        for column in ["Open", "High", "Low", "Close", "Volume"]:
+            validated[column] = pd.to_numeric(validated[column], errors="coerce")
+        validated = validated.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
         if not allow_short and len(validated) < self.min_history_rows:
             self._logger.warning(
                 "History for %s has only %s rows (minimum %s)",

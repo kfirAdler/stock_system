@@ -55,37 +55,43 @@ class AnalysisRunner:
         self._emit_log("Loading benchmark history")
         benchmark = self.market_data_service.get_history(self.benchmark_symbol)
         self._emit_log(f"Fetching historical data with {self.max_workers} worker(s)")
-        histories = self.market_data_service.get_histories(
-            tickers=tickers,
-            max_workers=self.max_workers,
-            progress_callback=self._on_history_progress,
-        )
 
         analyses: list[StockAnalysis] = []
         feature_histories: dict[str, pd.DataFrame] = {}
+        latest_rows: dict[str, pd.Series] = {}
         sector_returns: dict[str, list[float]] = {}
 
-        for ticker, history in histories.items():
+        def process_history(ticker: str, history: pd.DataFrame) -> None:
             if history.empty:
-                continue
+                return
 
             features = self.feature_calculator.compute(history, benchmark_frame=benchmark)
             clean_features = self.feature_validator.clean(features)
             if clean_features.empty:
-                continue
-            feature_histories[ticker] = clean_features
+                return
+            optimized_features = self._optimize_feature_frame(clean_features)
+            feature_histories[ticker] = optimized_features
+            latest_rows[ticker] = clean_features.iloc[-1].copy()
             sector = sector_by_ticker.get(ticker, "Unknown")
             recent_return = self._latest_short_run_return(clean_features)
             sector_returns.setdefault(sector, []).append(recent_return)
+
+        self.market_data_service.get_histories(
+            tickers=tickers,
+            max_workers=self.max_workers,
+            progress_callback=self._on_history_progress,
+            on_history=process_history,
+        )
 
         sector_strength = {
             sector: (sum(values) / len(values)) if values else 0.0
             for sector, values in sector_returns.items()
         }
 
-        for ticker, clean_features in feature_histories.items():
-            latest_ts = clean_features.index[-1]
-            latest_row = clean_features.iloc[-1].copy()
+        for ticker, latest_row in latest_rows.items():
+            if ticker not in feature_histories:
+                continue
+            latest_ts = feature_histories[ticker].index[-1]
             sector = sector_by_ticker.get(ticker, "Unknown")
             latest_row["sector_strength"] = sector_strength.get(sector, 0.0)
 
@@ -243,3 +249,13 @@ class AnalysisRunner:
         if len(frame) < 21:
             return 0.0
         return float(frame["Close"].iloc[-1] / frame["Close"].iloc[-21] - 1.0)
+
+    @staticmethod
+    def _optimize_feature_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        optimized = frame.copy()
+        for column in optimized.columns:
+            if pd.api.types.is_float_dtype(optimized[column]):
+                optimized[column] = pd.to_numeric(optimized[column], downcast="float")
+            elif pd.api.types.is_integer_dtype(optimized[column]):
+                optimized[column] = pd.to_numeric(optimized[column], downcast="integer")
+        return optimized
