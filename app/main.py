@@ -53,6 +53,7 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         history_tail_rows=settings.history_tail_rows,
         history_fetch_lookback_days=settings.history_fetch_lookback_days,
         min_refetch_interval_minutes=settings.min_refetch_interval_minutes,
+        worker_stall_timeout_seconds=settings.worker_stall_timeout_seconds,
         cache_enabled=settings.cache_enabled,
         force_refresh=settings.force_refresh,
         supabase_cache=supabase_market_cache,

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+import time
 from typing import Callable
 
 import pandas as pd
@@ -23,6 +24,7 @@ class MarketDataService:
     history_tail_rows: int = 1200
     history_fetch_lookback_days: int = 1800
     min_refetch_interval_minutes: int = 30
+    worker_stall_timeout_seconds: int = 90
     cache_enabled: bool = True
     force_refresh: bool = False
     supabase_cache: SupabaseMarketDataCache | None = None
@@ -33,14 +35,32 @@ class MarketDataService:
         if self.local_file_cache_enabled:
             self.raw_data_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_history(self, ticker: str, use_cache: bool = True) -> pd.DataFrame:
+    def get_history(self, ticker: str, use_cache: bool = True, allow_remote_fetch: bool = True) -> pd.DataFrame:
+        return self._get_history(ticker=ticker, use_cache=use_cache, allow_remote_fetch=allow_remote_fetch)
+
+    def _get_history(self, ticker: str, use_cache: bool, allow_remote_fetch: bool) -> pd.DataFrame:
         cache_file = self.raw_data_dir / f"{ticker.upper()}.csv"
         allow_cache = self.cache_enabled and use_cache
         use_supabase_cache = self.supabase_cache is not None and self.supabase_cache.enabled
         if not use_supabase_cache and not self.local_file_cache_enabled:
             raise RuntimeError("No cache backend configured. Enable Supabase or local file cache.")
         if use_supabase_cache:
-            return self._get_history_supabase(ticker=ticker, allow_cache=allow_cache)
+            return self._get_history_supabase(
+                ticker=ticker,
+                allow_cache=allow_cache,
+                allow_remote_fetch=allow_remote_fetch,
+            )
+
+        if not allow_remote_fetch:
+            if not allow_cache:
+                self._logger.warning("Cache-only mode for %s but cache is disabled", ticker)
+                return pd.DataFrame()
+            cached = self._read_cached(cache_file)
+            validated_cached = self._validate(cached, ticker, allow_short=True)
+            if validated_cached.empty:
+                self._logger.warning("Cache-only mode: no cached data for %s", ticker)
+                return pd.DataFrame()
+            return self._trim_for_analysis(self._validate(validated_cached, ticker), ticker)
 
         if allow_cache and not self.force_refresh:
             cached = self.supabase_cache.load_history(ticker) if use_supabase_cache else self._read_cached(cache_file)
@@ -87,9 +107,22 @@ class MarketDataService:
 
         return self._fetch_and_cache_full(ticker, cache_file)
 
-    def _get_history_supabase(self, ticker: str, allow_cache: bool) -> pd.DataFrame:
+    def _get_history_supabase(self, ticker: str, allow_cache: bool, allow_remote_fetch: bool) -> pd.DataFrame:
         if self.supabase_cache is None:
             raise RuntimeError("Supabase cache is not configured")
+
+        if not allow_remote_fetch:
+            if not allow_cache:
+                self._logger.warning("Cache-only mode for %s but cache is disabled", ticker)
+                return pd.DataFrame()
+            recent_limit = max(self.min_history_rows, self.history_tail_rows)
+            cached_recent = self.supabase_cache.load_recent_history(ticker=ticker, limit_rows=recent_limit)
+            validated_cached = self._validate(cached_recent, ticker, allow_short=True)
+            if validated_cached.empty:
+                self._logger.warning("Cache-only mode: no cached data for %s", ticker)
+                return pd.DataFrame()
+            self._logger.info("Cache-only mode: loaded %s recent rows for %s", len(validated_cached), ticker)
+            return self._trim_for_analysis(self._validate(validated_cached, ticker), ticker)
 
         if not allow_cache or self.force_refresh:
             self._logger.info("Force refresh for %s (bounded lookback window)", ticker)
@@ -182,6 +215,7 @@ class MarketDataService:
         max_workers: int = 1,
         progress_callback: Callable[[int, int, str], None] | None = None,
         on_history: Callable[[str, pd.DataFrame], None] | None = None,
+        allow_remote_fetch: bool = True,
     ) -> dict[str, pd.DataFrame]:
         histories: dict[str, pd.DataFrame] = {}
         total = len(tickers)
@@ -191,7 +225,7 @@ class MarketDataService:
         worker_count = max(1, min(max_workers, total))
         if worker_count == 1:
             for idx, ticker in enumerate(tickers, start=1):
-                history = self.get_history(ticker=ticker, use_cache=use_cache)
+                history = self._get_history(ticker=ticker, use_cache=use_cache, allow_remote_fetch=allow_remote_fetch)
                 if on_history is None:
                     histories[ticker] = history
                 else:
@@ -200,26 +234,60 @@ class MarketDataService:
                     progress_callback(idx, total, ticker)
             return histories
 
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="md") as executor:
-            futures = {executor.submit(self.get_history, ticker=ticker, use_cache=use_cache): ticker for ticker in tickers}
-            completed = 0
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    history = future.result()
-                    if on_history is None:
-                        histories[ticker] = history
-                    else:
-                        on_history(ticker, history)
-                except Exception:  # noqa: BLE001
-                    self._logger.exception("Failed fetching history for %s", ticker)
-                    if on_history is None:
-                        histories[ticker] = pd.DataFrame()
-                    else:
-                        on_history(ticker, pd.DataFrame())
-                completed += 1
-                if progress_callback is not None:
-                    progress_callback(completed, total, ticker)
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="md")
+        futures = {
+            executor.submit(self._get_history, ticker=ticker, use_cache=use_cache, allow_remote_fetch=allow_remote_fetch): ticker
+            for ticker in tickers
+        }
+        pending = set(futures.keys())
+        completed = 0
+        last_progress = time.monotonic()
+        try:
+            while pending:
+                done, still_pending = wait(pending, timeout=2.0, return_when=FIRST_COMPLETED)
+                if not done:
+                    stalled_for = time.monotonic() - last_progress
+                    if stalled_for >= self.worker_stall_timeout_seconds:
+                        self._logger.warning(
+                            "Parallel fetch stalled for %.1fs with %s pending tickers; cancelling pending tasks",
+                            stalled_for,
+                            len(still_pending),
+                        )
+                        for future in list(still_pending):
+                            ticker = futures[future]
+                            future.cancel()
+                            if on_history is None:
+                                histories[ticker] = pd.DataFrame()
+                            else:
+                                on_history(ticker, pd.DataFrame())
+                            completed += 1
+                            if progress_callback is not None:
+                                progress_callback(completed, total, ticker)
+                        pending = set()
+                        break
+                    continue
+
+                last_progress = time.monotonic()
+                for future in done:
+                    ticker = futures[future]
+                    try:
+                        history = future.result()
+                        if on_history is None:
+                            histories[ticker] = history
+                        else:
+                            on_history(ticker, history)
+                    except Exception:  # noqa: BLE001
+                        self._logger.exception("Failed fetching history for %s", ticker)
+                        if on_history is None:
+                            histories[ticker] = pd.DataFrame()
+                        else:
+                            on_history(ticker, pd.DataFrame())
+                    completed += 1
+                    if progress_callback is not None:
+                        progress_callback(completed, total, ticker)
+                pending = still_pending
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         return histories
 
     def _fetch_and_cache_full(self, ticker: str, cache_file: Path) -> pd.DataFrame:

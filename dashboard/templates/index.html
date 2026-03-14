@@ -37,6 +37,10 @@
           <input type="hidden" name="classification" value="{{ selected_classification }}" />
           <input type="hidden" name="sort_by" value="{{ sort_by }}" />
           <input type="hidden" name="widget_tf" value="{{ widget_tf }}" />
+          <label class="checkbox-inline">
+            <input type="checkbox" name="cache_only" value="1" id="cache-only-checkbox" />
+            {{ t.cache_only }}
+          </label>
           <button type="submit" class="btn" id="run-again-btn">{{ t.run_again }}</button>
         </form>
 
@@ -309,7 +313,8 @@
           event.preventDefault();
           runBtn.disabled = true;
           try {
-            const response = await fetch(runForm.action, { method: "POST" });
+            const formData = new FormData(runForm);
+            const response = await fetch(runForm.action, { method: "POST", body: formData });
             const payload = await response.json();
             renderJobStatus(payload.status || {});
             lastSeenStatus = (payload.status && payload.status.status) || lastSeenStatus;

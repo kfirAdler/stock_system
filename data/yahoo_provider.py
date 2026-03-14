@@ -14,6 +14,8 @@ from data.base_provider import MarketDataProvider
 class YahooFinanceDataProvider(MarketDataProvider):
     """Fetches daily OHLCV history from Yahoo Finance."""
 
+    timeout_seconds: int = 20
+
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
 
@@ -37,6 +39,7 @@ class YahooFinanceDataProvider(MarketDataProvider):
                 auto_adjust=False,
                 progress=False,
                 threads=False,
+                timeout=self.timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("Yahoo fetch failed for %s: %s", ticker, exc)
@@ -58,4 +61,3 @@ class YahooFinanceDataProvider(MarketDataProvider):
         cleaned = cleaned[cleaned["Close"] > 0]
         cleaned.index.name = "date"
         return cleaned
-

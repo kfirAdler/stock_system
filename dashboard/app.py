@@ -18,6 +18,7 @@ def _texts(lang: str) -> dict[str, str]:
     en = {
         "title": "Stock Scanner Dashboard",
         "run_again": "Run Again",
+        "cache_only": "Run without fetching",
         "status": "Status",
         "scan_job": "Scan Job",
         "job_status": "Job Status",
@@ -108,6 +109,7 @@ def _texts(lang: str) -> dict[str, str]:
     he = {
         "title": "לוח סריקת מניות",
         "run_again": "הרץ שוב",
+        "cache_only": "הרץ ללא משיכה",
         "status": "סטטוס",
         "scan_job": "משימת סריקה",
         "job_status": "סטטוס משימה",
@@ -327,13 +329,15 @@ def create_app() -> Flask:
 
     @app.post("/run-again")
     def run_again() -> tuple[dict, int]:
-        started, message = scan_job_service.start()
+        cache_only = request.form.get("cache_only", "").lower() in {"1", "true", "on", "yes"}
+        started, message = scan_job_service.start(cache_only=cache_only)
         code = 202 if started else 409
         return (
             jsonify(
                 {
                     "started": started,
                     "message": message,
+                    "cache_only": cache_only,
                     "status": scan_job_service.status(),
                 }
             ),

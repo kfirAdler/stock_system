@@ -46,14 +46,20 @@ class AnalysisRunner:
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def run(self) -> AnalysisBatchResult:
+    def run(self, use_cache_only: bool = False) -> AnalysisBatchResult:
         tickers = self.universe_loader.load()
         self._logger.info("Loaded %s tickers", len(tickers))
         self._emit_log(f"Loaded {len(tickers)} tickers")
+        if use_cache_only:
+            self._emit_log("Running in cache-only mode (remote fetch disabled)")
         sector_by_ticker = {ticker: self.universe_loader.sector_for(ticker) for ticker in tickers}
 
         self._emit_log("Loading benchmark history")
-        benchmark = self.market_data_service.get_history(self.benchmark_symbol)
+        benchmark = self.market_data_service.get_history(
+            ticker=self.benchmark_symbol,
+            use_cache=True,
+            allow_remote_fetch=not use_cache_only,
+        )
         self._emit_log(f"Fetching historical data with {self.max_workers} worker(s)")
 
         analyses: list[StockAnalysis] = []
@@ -81,6 +87,7 @@ class AnalysisRunner:
             max_workers=self.max_workers,
             progress_callback=self._on_history_progress,
             on_history=process_history,
+            allow_remote_fetch=not use_cache_only,
         )
 
         sector_strength = {

@@ -86,6 +86,15 @@ body {
   flex-wrap: wrap;
 }
 
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .status {
   border-radius: 999px;
   padding: 4px 10px;

@@ -81,6 +81,9 @@ class AppSettings:
     min_refetch_interval_minutes: int = field(
         default_factory=lambda: max(0, _env_int("MIN_REFETCH_INTERVAL_MINUTES", 30))
     )
+    worker_stall_timeout_seconds: int = field(
+        default_factory=lambda: max(15, _env_int("WORKER_STALL_TIMEOUT_SECONDS", 90))
+    )
     rolling_volume_window: int = 20
     ma_short_window: int = 20
     ma_long_window: int = 50

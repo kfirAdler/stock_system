@@ -28,11 +28,12 @@ class ScanJobService:
     _started_at: str | None = field(default=None, init=False)
     _finished_at: str | None = field(default=None, init=False)
     _logs: deque[dict[str, str]] = field(default_factory=lambda: deque(maxlen=300), init=False)
+    _cache_only: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def start(self) -> tuple[bool, str]:
+    def start(self, cache_only: bool = False) -> tuple[bool, str]:
         """Start an async scan job if none is currently running."""
         with self._lock:
             if self._status == "running" and self._thread is not None and self._thread.is_alive():
@@ -45,6 +46,7 @@ class ScanJobService:
             self._error = None
             self._started_at = datetime.now(UTC).isoformat()
             self._finished_at = None
+            self._cache_only = cache_only
             self._logs.clear()
 
             self._thread = threading.Thread(target=self._run, name="scanner-job", daemon=True)
@@ -71,11 +73,13 @@ class ScanJobService:
     def _run(self) -> None:
         try:
             self._add_log("Scan job started")
+            if self._cache_only:
+                self._add_log("Cache-only mode enabled")
             runner = build_runner(self.settings)
             runner.progress_callback = self._on_progress
             runner.log_callback = self._add_log
             runner.max_workers = max(1, self.settings.scan_workers)
-            result = runner.run()
+            result = runner.run(use_cache_only=self._cache_only)
             with self._lock:
                 self._status = "completed"
                 self._phase = "done"
@@ -104,4 +108,3 @@ class ScanJobService:
         now = datetime.now(UTC).isoformat()
         with self._lock:
             self._logs.append({"time": now, "message": message})
-
