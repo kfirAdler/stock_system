@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ class DashboardDataService:
 
     settings: AppSettings
     supabase_repository: SupabasePostgresRepository | None = None
+    _widget_memory_cache: dict[str, tuple[datetime, pd.DataFrame]] = field(default_factory=dict, init=False)
 
     def latest_run_id(self) -> str | None:
         if self.supabase_repository is not None and self.supabase_repository.enabled:
@@ -493,6 +494,9 @@ class DashboardDataService:
         return aggregated.dropna().sort_index()
 
     def _load_symbol_with_cache(self, symbol: str, cache_key: str) -> pd.DataFrame:
+        if self.settings.save_to_supabase:
+            return self._load_symbol_with_memory_cache(symbol=symbol, cache_key=cache_key)
+
         cache_file = self.settings.raw_data_dir / f"index_{cache_key}.csv"
         today = date.today()
         yesterday = today - timedelta(days=1)
@@ -516,6 +520,22 @@ class DashboardDataService:
         if not fresh.empty:
             fresh.to_csv(cache_file)
         return fresh
+
+    def _load_symbol_with_memory_cache(self, symbol: str, cache_key: str) -> pd.DataFrame:
+        """Widget cache for strict Supabase mode without local file writes."""
+        now = datetime.now(UTC)
+        cached = self._widget_memory_cache.get(cache_key)
+        if cached is not None:
+            cached_at, frame = cached
+            if now - cached_at <= timedelta(minutes=15):
+                return frame
+
+        frame = self._fetch_stooq(symbol=symbol)
+        if frame.empty and cached is not None:
+            return cached[1]
+        if not frame.empty:
+            self._widget_memory_cache[cache_key] = (now, frame)
+        return frame
 
     @staticmethod
     def _read_cached(path: Path) -> pd.DataFrame:
