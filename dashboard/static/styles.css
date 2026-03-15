@@ -532,6 +532,18 @@ td a:hover {
   line-height: 1.35;
 }
 
+.thinking-plans {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thinking-plans li {
+  line-height: 1.45;
+}
+
 .job-progress-wrap {
   margin-top: 10px;
 }

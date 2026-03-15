@@ -103,8 +103,10 @@ class DashboardSimulatorService:
 
         latest = self.data_service.load_latest_run(lang="en", sort_by="score", widget_tf="d")
         prices = {}
+        latest_rows: list[dict[str, Any]] = []
         if latest is not None:
-            prices = {row["ticker"]: float(row.get("latest_close") or 0.0) for row in latest.get("rows", [])}
+            latest_rows = latest.get("rows", [])
+            prices = {row["ticker"]: float(row.get("latest_close") or 0.0) for row in latest_rows}
 
         open_positions = list(state["open_positions"].values())
         total_market_value = 0.0
@@ -131,6 +133,7 @@ class DashboardSimulatorService:
 
         actions = self._load_recent_actions(limit=180)
         waiting_market = not market_open and len(open_positions) == 0
+        thinking_plans = self._build_thinking_plans(latest_rows=latest_rows, market_open=market_open)
 
         return {
             "status": state.get("status", "idle"),
@@ -149,6 +152,7 @@ class DashboardSimulatorService:
             "last_run_id": state.get("last_run_id"),
             "now_display": self._format_et(now.isoformat()),
             "waiting_market": waiting_market,
+            "thinking_plans": thinking_plans,
         }
 
     def _apply_exits(self, state: dict[str, Any], prices: dict[str, float], now: datetime) -> None:
@@ -594,3 +598,67 @@ class DashboardSimulatorService:
         if now.weekday() >= 5:
             return False
         return time(hour=9, minute=30) <= now.time() <= time(hour=16, minute=0)
+
+    def _build_thinking_plans(self, latest_rows: list[dict[str, Any]], market_open: bool) -> list[dict[str, str]]:
+        plans: list[dict[str, str]] = []
+        if not latest_rows:
+            return plans
+
+        candidates = [
+            row
+            for row in latest_rows
+            if str(row.get("classification", "")).upper() == "BUY"
+            and str(row.get("buyability_status", "AVOID")).upper() != "AVOID"
+        ]
+        candidates = sorted(
+            candidates,
+            key=lambda row: (
+                str(row.get("buyability_status", "")).upper() == "BUYABLE_NOW",
+                float(row.get("entry_timing_score") or 0.0),
+                float(row.get("score") or 0.0),
+            ),
+            reverse=True,
+        )[:8]
+
+        for row in candidates:
+            ticker = str(row.get("ticker", "")).upper()
+            if not ticker:
+                continue
+            buyability = str(row.get("buyability_status", "WATCH_ONLY")).upper()
+            entry = float(row.get("suggested_entry") or row.get("latest_close") or 0.0)
+            stop = float(row.get("suggested_stop_loss") or 0.0)
+            target = float(row.get("suggested_first_target") or 0.0)
+            reason = str(row.get("buyability_reason") or "").strip()
+            if entry <= 0 or stop <= 0 or target <= 0:
+                continue
+
+            if buyability == "BUYABLE_NOW" and market_open:
+                text = (
+                    f"I am going to buy at ${entry:,.2f} with risk stop ${stop:,.2f} "
+                    f"and first target ${target:,.2f}."
+                )
+            elif buyability == "BUYABLE_NOW":
+                text = (
+                    f"Setup is ready, but market is closed. Planned buy at ${entry:,.2f}, "
+                    f"stop ${stop:,.2f}, target ${target:,.2f}."
+                )
+            elif buyability == "WAIT_FOR_PULLBACK":
+                text = (
+                    f"I will wait for a pullback toward ${entry:,.2f} before buying. "
+                    f"Current plan stop ${stop:,.2f}, target ${target:,.2f}."
+                )
+            elif buyability == "WAIT_FOR_BREAKOUT_CONFIRMATION":
+                text = (
+                    f"I will wait for breakout confirmation before entry near ${entry:,.2f}. "
+                    f"Planned stop ${stop:,.2f}, target ${target:,.2f}."
+                )
+            else:
+                text = (
+                    f"I am watching this setup and will wait for better timing near ${entry:,.2f}. "
+                    f"Current stop plan ${stop:,.2f}, target ${target:,.2f}."
+                )
+
+            if reason:
+                text = f"{text} {reason}"
+            plans.append({"ticker": ticker, "text": text})
+        return plans

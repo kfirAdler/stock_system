@@ -102,14 +102,7 @@ class AppSettings:
         object.__setattr__(self, "raw_data_dir", self.output_dir / "raw_data")
         object.__setattr__(self, "analyses_dir", self.output_dir / "analyses")
         object.__setattr__(self, "portfolios_dir", self.output_dir / "portfolios")
-        if self.save_to_supabase and not (self.supabase_db_url and self.supabase_db_url.strip()):
+        if not self.save_to_supabase:
+            raise ValueError("This deployment is Supabase-only. Set SAVE_TO_SUPABASE=true.")
+        if not (self.supabase_db_url and self.supabase_db_url.strip()):
             raise ValueError("SAVE_TO_SUPABASE=true requires SUPABASE_DB_URL to be set")
-
-    def ensure_directories(self) -> None:
-        """Create runtime directories if they do not already exist."""
-        if self.save_to_supabase:
-            # Strict Supabase mode: no local analysis/raw-data directory requirement.
-            return
-        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
-        self.analyses_dir.mkdir(parents=True, exist_ok=True)
-        self.portfolios_dir.mkdir(parents=True, exist_ok=True)

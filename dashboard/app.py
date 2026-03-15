@@ -27,6 +27,10 @@ def _texts(lang: str) -> dict[str, str]:
         "job_current_ticker": "Current Ticker",
         "job_logs": "Live Logs",
         "job_running_msg": "Job is already running",
+        "job_mode": "Mode",
+        "job_decision": "Decision",
+        "job_fetch_phase": "Fetch Phase",
+        "job_phases_done": "Fetch Phases Done Today",
         "filter": "Filter",
         "all": "All",
         "summary": "Latest Run Summary",
@@ -95,6 +99,8 @@ def _texts(lang: str) -> dict[str, str]:
         "sim_wait_market": "The simulator is waiting for market hours to resume",
         "sim_no_positions": "No open positions yet",
         "sim_no_trades": "No trades executed yet",
+        "sim_thinking": "Simulator Thinking",
+        "sim_no_plans": "No actionable plans right now",
         "time_col": "Time",
         "symbol_col": "Symbol",
         "action_col": "Action Taken",
@@ -118,6 +124,10 @@ def _texts(lang: str) -> dict[str, str]:
         "job_current_ticker": "סימול נוכחי",
         "job_logs": "לוגים חיים",
         "job_running_msg": "המשימה כבר רצה",
+        "job_mode": "מצב",
+        "job_decision": "החלטה",
+        "job_fetch_phase": "שלב משיכה",
+        "job_phases_done": "שלבי משיכה שהושלמו היום",
         "filter": "סינון",
         "all": "הכל",
         "summary": "סיכום הריצה האחרונה",
@@ -186,6 +196,8 @@ def _texts(lang: str) -> dict[str, str]:
         "sim_wait_market": "הסימולטור ממתין לחידוש שעות המסחר",
         "sim_no_positions": "אין עדיין פוזיציות פתוחות",
         "sim_no_trades": "עדיין לא בוצעו עסקאות",
+        "sim_thinking": "חשיבת הסימולטור",
+        "sim_no_plans": "אין כרגע תוכניות פעולה ישימות",
         "time_col": "זמן",
         "symbol_col": "סימול",
         "action_col": "פעולה",
@@ -216,12 +228,10 @@ def create_app() -> Flask:
         settings.save_to_supabase,
         settings.output_dir,
     )
-    settings.ensure_directories()
     supabase_repository = SupabasePostgresRepository(
-        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+        db_url=settings.supabase_db_url,
     )
-    if settings.save_to_supabase:
-        supabase_repository.healthcheck()
+    supabase_repository.healthcheck()
     data_service = DashboardDataService(settings=settings, supabase_repository=supabase_repository)
     scan_job_service = ScanJobService(settings=settings)
     simulator_service = DashboardSimulatorService(

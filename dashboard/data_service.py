@@ -494,32 +494,7 @@ class DashboardDataService:
         return aggregated.dropna().sort_index()
 
     def _load_symbol_with_cache(self, symbol: str, cache_key: str) -> pd.DataFrame:
-        if self.settings.save_to_supabase:
-            return self._load_symbol_with_memory_cache(symbol=symbol, cache_key=cache_key)
-
-        cache_file = self.settings.raw_data_dir / f"index_{cache_key}.csv"
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-
-        cached = self._read_cached(cache_file)
-        if not cached.empty:
-            last_cached = cached.index.max().date()
-            if last_cached >= yesterday:
-                return cached
-
-            incremental = self._fetch_stooq(symbol=symbol, start_date=last_cached + timedelta(days=1), end_date=today)
-            if incremental.empty:
-                return cached
-
-            merged = pd.concat([cached, incremental], axis=0)
-            merged = merged[~merged.index.duplicated(keep="last")].sort_index()
-            merged.to_csv(cache_file)
-            return merged
-
-        fresh = self._fetch_stooq(symbol=symbol)
-        if not fresh.empty:
-            fresh.to_csv(cache_file)
-        return fresh
+        return self._load_symbol_with_memory_cache(symbol=symbol, cache_key=cache_key)
 
     def _load_symbol_with_memory_cache(self, symbol: str, cache_key: str) -> pd.DataFrame:
         """Widget cache for strict Supabase mode without local file writes."""
@@ -536,17 +511,6 @@ class DashboardDataService:
         if not frame.empty:
             self._widget_memory_cache[cache_key] = (now, frame)
         return frame
-
-    @staticmethod
-    def _read_cached(path: Path) -> pd.DataFrame:
-        if not path.exists():
-            return pd.DataFrame()
-        try:
-            frame = pd.read_csv(path, parse_dates=["date"]).set_index("date")
-            frame.index.name = "date"
-            return frame.sort_index()
-        except Exception:  # noqa: BLE001
-            return pd.DataFrame()
 
     @staticmethod
     def _fetch_stooq(symbol: str, start_date: date | None = None, end_date: date | None = None) -> pd.DataFrame:

@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from collections import Counter
+from math import isinf, isnan
+from typing import Any
 
 import pandas as pd
 
@@ -18,8 +20,6 @@ from features.feature_validator import FeatureValidator
 from planning.trade_planner import TradePlanner
 from portfolio.simulator import PortfolioSimulator
 from scoring.stock_scorer import StockScorer
-from storage.csv_repository import AnalysisResultCsvRepository
-from storage.json_repository import AnalysisResultJsonRepository
 from storage.supabase_postgres_repository import SupabasePostgresRepository
 
 
@@ -34,11 +34,8 @@ class AnalysisRunner:
     scorer: StockScorer
     planner: TradePlanner
     simulator: PortfolioSimulator
-    csv_repository: AnalysisResultCsvRepository
-    json_repository: AnalysisResultJsonRepository
     supabase_repository: SupabasePostgresRepository | None = None
     benchmark_symbol: str = "SPY"
-    persist_local_files: bool = True
     max_workers: int = 1
     progress_callback: Callable[[str, int, int, str], None] | None = None
     log_callback: Callable[[str], None] | None = None
@@ -166,9 +163,6 @@ class AnalysisRunner:
             backtest_summary=backtest_summary,
         )
 
-        if self.persist_local_files:
-            self.csv_repository.save_portfolio_snapshots(snapshots, run_id=run_id)
-            self.json_repository.save_run_artifacts(result)
         if self.supabase_repository is not None and self.supabase_repository.enabled:
             self.supabase_repository.save_analysis_batch(result)
         self._emit_log(f"Run completed. run_id={run_id} analyses={len(analyses)}")
@@ -242,10 +236,16 @@ class AnalysisRunner:
         )
 
     @staticmethod
-    def _safe_round(value: object, digits: int) -> float | None:
-        if value is None or pd.isna(value):
+    def _safe_round(value: Any, digits: int) -> float | None:
+        if value is None:
             return None
-        return round(float(value), digits)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if isnan(numeric) or isinf(numeric):
+            return None
+        return round(numeric, digits)
 
     @staticmethod
     def _latest_short_run_return(frame: pd.DataFrame) -> float:

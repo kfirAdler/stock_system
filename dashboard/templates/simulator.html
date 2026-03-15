@@ -42,6 +42,20 @@
         <svg id="equity-chart" class="equity-chart" viewBox="0 0 960 260" preserveAspectRatio="none"></svg>
       </section>
 
+      <section class="panel">
+        <h3 class="panel-title">{{ t.sim_thinking }}</h3>
+        {% if sim.thinking_plans %}
+        <ul id="thinking-plans" class="thinking-plans">
+          {% for plan in sim.thinking_plans %}
+          <li><strong>{{ plan.ticker }}</strong> - {{ plan.text }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state" id="thinking-empty">{{ t.sim_no_plans }}</div>
+        <ul id="thinking-plans" class="thinking-plans" style="display:none;"></ul>
+        {% endif %}
+      </section>
+
       <section class="panel table-wrap">
         <h3 class="panel-title">{{ t.sim_positions }}</h3>
         {% if sim.open_positions %}
@@ -125,6 +139,7 @@
       const txtMarketClosed = {{ t.market_closed | tojson }};
       const txtNoPositions = {{ t.sim_no_positions | tojson }};
       const txtNoTrades = {{ t.sim_no_trades | tojson }};
+      const txtNoPlans = {{ t.sim_no_plans | tojson }};
 
       const currencyFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
       const numberFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -268,6 +283,26 @@
                 <td>${fmtCurrency(a.portfolio_value)}</td>
               </tr>`)
               .join("");
+          }
+        }
+
+        const thinkingList = document.getElementById("thinking-plans");
+        const thinkingEmpty = document.getElementById("thinking-empty");
+        const plans = sim.thinking_plans || [];
+        if (thinkingList) {
+          if (plans.length === 0) {
+            thinkingList.innerHTML = "";
+            thinkingList.style.display = "none";
+            if (thinkingEmpty) {
+              thinkingEmpty.style.display = "block";
+              thinkingEmpty.textContent = txtNoPlans;
+            }
+          } else {
+            thinkingList.style.display = "block";
+            thinkingList.innerHTML = plans
+              .map((p) => `<li><strong>${p.ticker}</strong> - ${p.text}</li>`)
+              .join("");
+            if (thinkingEmpty) thinkingEmpty.style.display = "none";
           }
         }
 

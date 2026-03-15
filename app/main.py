@@ -18,8 +18,6 @@ from scoring.scoring_rules import ScoringRules
 from scoring.stock_scorer import StockScorer
 from services.analysis_runner import AnalysisRunner
 from services.report_service import ReportService
-from storage.csv_repository import AnalysisResultCsvRepository
-from storage.json_repository import AnalysisResultJsonRepository
 from storage.supabase_market_data_cache import SupabaseMarketDataCache
 from storage.supabase_postgres_repository import SupabasePostgresRepository
 
@@ -35,20 +33,18 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
     else:
         provider = FallbackMarketDataProvider(providers=[stooq_provider, yahoo_provider])
     supabase_market_cache = SupabaseMarketDataCache(
-        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+        db_url=settings.supabase_db_url,
     )
     supabase_repository = SupabasePostgresRepository(
-        db_url=settings.supabase_db_url if settings.save_to_supabase else None,
+        db_url=settings.supabase_db_url,
     )
 
-    if settings.save_to_supabase:
-        # Fail fast when Supabase is required.
-        supabase_market_cache.healthcheck()
-        supabase_repository.healthcheck()
+    # Fail fast when Supabase is required.
+    supabase_market_cache.healthcheck()
+    supabase_repository.healthcheck()
 
     market_data_service = MarketDataService(
         provider=provider,
-        raw_data_dir=settings.raw_data_dir,
         min_history_rows=settings.min_history_rows,
         history_tail_rows=settings.history_tail_rows,
         history_fetch_lookback_days=settings.history_fetch_lookback_days,
@@ -57,7 +53,6 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
         cache_enabled=settings.cache_enabled,
         force_refresh=settings.force_refresh,
         supabase_cache=supabase_market_cache,
-        local_file_cache_enabled=not settings.save_to_supabase,
     )
 
     scorer = StockScorer(
@@ -82,17 +77,8 @@ def build_runner(settings: AppSettings) -> AnalysisRunner:
             target_pct=settings.simulation.take_profit_pct,
         ),
         simulator=PortfolioSimulator(scorer=scorer, settings=settings.simulation),
-        csv_repository=AnalysisResultCsvRepository(
-            analyses_dir=settings.analyses_dir,
-            portfolios_dir=settings.portfolios_dir,
-        ),
-        json_repository=AnalysisResultJsonRepository(
-            analyses_dir=settings.analyses_dir,
-            portfolios_dir=settings.portfolios_dir,
-        ),
         supabase_repository=supabase_repository,
         benchmark_symbol=settings.benchmark_symbol,
-        persist_local_files=not settings.save_to_supabase,
         max_workers=settings.scan_workers,
     )
 
@@ -109,8 +95,6 @@ def main() -> None:
         settings.save_to_supabase,
         settings.output_dir,
     )
-    settings.ensure_directories()
-
     runner = build_runner(settings)
     result = runner.run()
 

@@ -82,6 +82,10 @@
           <div><strong>{{ t.job_phase }}:</strong> <span id="job-phase">{{ job_status.phase }}</span></div>
           <div><strong>{{ t.job_progress }}:</strong> <span id="job-progress">{{ job_status.progress_current }}/{{ job_status.progress_total }}</span></div>
           <div><strong>{{ t.job_current_ticker }}:</strong> <span id="job-current-ticker">{{ job_status.current_ticker or '-' }}</span></div>
+          <div><strong>{{ t.job_mode }}:</strong> <span id="job-mode">{{ 'CACHE_ONLY' if job_status.cache_only else 'FETCH' }}</span></div>
+          <div><strong>{{ t.job_fetch_phase }}:</strong> <span id="job-fetch-phase">{{ job_status.selected_fetch_phase or job_status.current_fetch_phase or '-' }}</span></div>
+          <div><strong>{{ t.job_phases_done }}:</strong> <span id="job-phases-done">{{ (job_status.completed_fetch_phases_today or [])|join(', ') or '-' }}</span></div>
+          <div><strong>{{ t.job_decision }}:</strong> <span id="job-decision">{{ job_status.decision_message or '-' }}</span></div>
         </div>
         {% set total = job_status.progress_total or 0 %}
         {% set current = job_status.progress_current or 0 %}
@@ -252,6 +256,10 @@
       const jobProgressFillEl = document.getElementById("job-progress-fill");
       const jobProgressPercentEl = document.getElementById("job-progress-percent");
       const jobTickerEl = document.getElementById("job-current-ticker");
+      const jobModeEl = document.getElementById("job-mode");
+      const jobFetchPhaseEl = document.getElementById("job-fetch-phase");
+      const jobPhasesDoneEl = document.getElementById("job-phases-done");
+      const jobDecisionEl = document.getElementById("job-decision");
       const jobLogsEl = document.getElementById("job-logs");
       const headerStatus = document.querySelector(".status");
       const jobRunningMessage = "{{ t.job_running_msg }}";
@@ -272,6 +280,19 @@
           jobProgressPercentEl.textContent = `${pct.toFixed(1)}%`;
         }
         jobTickerEl.textContent = status.current_ticker || "-";
+        if (jobModeEl) {
+          jobModeEl.textContent = status.cache_only ? "CACHE_ONLY" : "FETCH";
+        }
+        if (jobFetchPhaseEl) {
+          jobFetchPhaseEl.textContent = status.selected_fetch_phase || status.current_fetch_phase || "-";
+        }
+        if (jobPhasesDoneEl) {
+          const completed = Array.isArray(status.completed_fetch_phases_today) ? status.completed_fetch_phases_today : [];
+          jobPhasesDoneEl.textContent = completed.length ? completed.join(", ") : "-";
+        }
+        if (jobDecisionEl) {
+          jobDecisionEl.textContent = status.decision_message || "-";
+        }
         if (headerStatus) {
           headerStatus.className = `status status-${status.status || "idle"}`;
           headerStatus.textContent = `{{ t.status }}: ${String(status.status || "idle").toUpperCase()}`;
