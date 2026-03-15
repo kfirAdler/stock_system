@@ -86,12 +86,14 @@ class AnalysisRunner:
             on_history=process_history,
             allow_remote_fetch=not use_cache_only,
         )
+        self._emit_log(f"History phase done: {len(feature_histories)} tickers with usable feature frames")
 
         sector_strength = {
             sector: (sum(values) / len(values)) if values else 0.0
             for sector, values in sector_returns.items()
         }
 
+        self._emit_log("Starting latest-row scoring/classification phase")
         for ticker, latest_row in latest_rows.items():
             if ticker not in feature_histories:
                 continue
@@ -135,7 +137,10 @@ class AnalysisRunner:
                 )
             )
             self._on_analysis_progress(len(analyses), len(feature_histories), ticker)
+        self._emit_log(f"Analysis phase done: {len(analyses)} analyses built")
 
+        self._on_phase_progress("planning", 0, 1, "start")
+        self._emit_log("Starting trade-plan generation")
         analyses.sort(
             key=lambda item: (
                 item.buyability_status.value == "BUYABLE_NOW",
@@ -146,7 +151,18 @@ class AnalysisRunner:
             reverse=True,
         )
         plans = self.planner.build_plans(analyses)
-        snapshots = self.simulator.run(feature_histories)
+        self._on_phase_progress("planning", 1, 1, "done")
+        self._emit_log(f"Trade-plan generation done: {len(plans)} plans")
+
+        self._on_phase_progress("simulation", 0, 1, "start")
+        self._emit_log("Starting portfolio simulation")
+        snapshots = self.simulator.run(
+            feature_histories,
+            progress_callback=self._on_simulation_progress,
+            log_callback=self._emit_log,
+        )
+        self._on_phase_progress("simulation", 1, 1, "done")
+        self._emit_log(f"Portfolio simulation done: {len(snapshots)} snapshots")
 
         diagnostics = self._build_diagnostics(analyses)
         backtest_summary = self._build_backtest_summary(snapshots)
@@ -163,8 +179,10 @@ class AnalysisRunner:
             backtest_summary=backtest_summary,
         )
 
+        self._on_phase_progress("persistence", 0, 1, "start")
         if self.supabase_repository is not None and self.supabase_repository.enabled:
             self.supabase_repository.save_analysis_batch(result)
+        self._on_phase_progress("persistence", 1, 1, "done")
         self._emit_log(f"Run completed. run_id={run_id} analyses={len(analyses)}")
 
         return result
@@ -176,6 +194,14 @@ class AnalysisRunner:
     def _on_analysis_progress(self, current: int, total: int, ticker: str) -> None:
         if self.progress_callback is not None:
             self.progress_callback("analysis", current, total, ticker)
+
+    def _on_simulation_progress(self, current: int, total: int, snapshot_date: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback("simulation", current, total, snapshot_date)
+
+    def _on_phase_progress(self, phase: str, current: int, total: int, label: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(phase, current, total, label)
 
     def _emit_log(self, message: str) -> None:
         if self.log_callback is not None:

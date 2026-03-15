@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -20,7 +21,12 @@ class PortfolioSimulator:
     scorer: StockScorer
     settings: SimulationSettings
 
-    def run(self, feature_histories: dict[str, pd.DataFrame]) -> list[PortfolioSnapshot]:
+    def run(
+        self,
+        feature_histories: dict[str, pd.DataFrame],
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+    ) -> list[PortfolioSnapshot]:
         portfolio = Portfolio(initial_capital=self.settings.initial_capital)
         snapshots: list[PortfolioSnapshot] = []
         if not feature_histories:
@@ -34,13 +40,23 @@ class PortfolioSimulator:
         ]
         if not all_dates:
             return snapshots
+        if log_callback is not None:
+            log_callback(
+                f"Simulation date range prepared: {len(all_dates)} sessions "
+                f"({all_dates[0].date().isoformat()} -> {all_dates[-1].date().isoformat()})"
+            )
 
-        for ts in all_dates:
+        total = len(all_dates)
+        for idx, ts in enumerate(all_dates, start=1):
             current_date = ts.date()
             prices = self._daily_prices(feature_histories, ts)
             self._apply_exits(portfolio, prices, current_date)
             self._apply_entries(portfolio, feature_histories, ts, current_date)
             snapshots.append(portfolio.snapshot(snapshot_date=current_date, prices=prices))
+            if progress_callback is not None:
+                progress_callback(idx, total, current_date.isoformat())
+            if log_callback is not None and (idx == 1 or idx == total or idx % 60 == 0):
+                log_callback(f"Simulation progress {idx}/{total} ({current_date.isoformat()})")
 
         return snapshots
 
