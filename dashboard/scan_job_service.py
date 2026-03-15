@@ -33,6 +33,8 @@ class ScanJobService:
     _selected_phase: str | None = field(default=None, init=False)
     _decision_message: str = field(default="", init=False)
     _phase_fetch_log: dict[str, set[str]] = field(default_factory=dict, init=False)
+    _last_logged_phase: str | None = field(default=None, init=False)
+    _last_logged_progress: dict[str, int] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.__class__.__name__)
@@ -56,6 +58,8 @@ class ScanJobService:
             self._selected_phase = selected_phase
             self._decision_message = decision_message
             self._logs.clear()
+            self._last_logged_phase = None
+            self._last_logged_progress.clear()
 
             self._thread = threading.Thread(target=self._run, name="scanner-job", daemon=True)
             self._thread.start()
@@ -127,13 +131,35 @@ class ScanJobService:
             self._progress_current = current
             self._progress_total = total
             self._current_ticker = ticker
-        if current == 1 or current == total or current % 25 == 0:
+        if self._should_log_progress(phase=phase, current=current, total=total):
             self._add_log(f"{phase} {current}/{total} ({ticker})")
 
     def _add_log(self, message: str) -> None:
         now = datetime.now(UTC).isoformat()
         with self._lock:
             self._logs.append({"time": now, "message": message})
+
+    def _should_log_progress(self, phase: str, current: int, total: int) -> bool:
+        """Log often enough for visibility without flooding too hard."""
+        if phase != self._last_logged_phase:
+            self._last_logged_phase = phase
+            self._last_logged_progress[phase] = current
+            return True
+
+        if total <= 0:
+            return True
+
+        # For tiny phases (planning/persistence), always log.
+        if total <= 5:
+            self._last_logged_progress[phase] = current
+            return True
+
+        # For larger phases, log roughly every 5 items and always at end.
+        last = self._last_logged_progress.get(phase, 0)
+        if current >= total or current - last >= 5:
+            self._last_logged_progress[phase] = current
+            return True
+        return False
 
     def _decide_cache_mode(self, manual_cache_only: bool) -> tuple[bool, str | None, str]:
         now_et = datetime.now(self._market_tz)

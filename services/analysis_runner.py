@@ -87,6 +87,7 @@ class AnalysisRunner:
             allow_remote_fetch=not use_cache_only,
         )
         self._emit_log(f"History phase done: {len(feature_histories)} tickers with usable feature frames")
+        self._emit_log("Computing sector strength baselines")
 
         sector_strength = {
             sector: (sum(values) / len(values)) if values else 0.0
@@ -141,6 +142,7 @@ class AnalysisRunner:
 
         self._on_phase_progress("planning", 0, 1, "start")
         self._emit_log("Starting trade-plan generation")
+        self._emit_log("Sorting analyses by buyability, classification, entry timing, and score")
         analyses.sort(
             key=lambda item: (
                 item.buyability_status.value == "BUYABLE_NOW",
@@ -164,6 +166,7 @@ class AnalysisRunner:
         self._on_phase_progress("simulation", 1, 1, "done")
         self._emit_log(f"Portfolio simulation done: {len(snapshots)} snapshots")
 
+        self._emit_log("Building diagnostics and backtest summary")
         diagnostics = self._build_diagnostics(analyses)
         backtest_summary = self._build_backtest_summary(snapshots)
 
@@ -181,7 +184,9 @@ class AnalysisRunner:
 
         self._on_phase_progress("persistence", 0, 1, "start")
         if self.supabase_repository is not None and self.supabase_repository.enabled:
+            self._emit_log("Persisting analysis batch to Supabase")
             self.supabase_repository.save_analysis_batch(result)
+            self._emit_log("Supabase persistence completed")
         self._on_phase_progress("persistence", 1, 1, "done")
         self._emit_log(f"Run completed. run_id={run_id} analyses={len(analyses)}")
 
