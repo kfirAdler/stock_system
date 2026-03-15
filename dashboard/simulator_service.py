@@ -584,11 +584,17 @@ class DashboardSimulatorService:
             return "neutral"
         return "neutral"
 
-    def _format_et(self, value: str | None) -> str:
-        if not value:
+    def _format_et(self, value: object) -> str:
+        if value in (None, "", "-"):
             return "-"
-        text = value.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(text)
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            text = str(value).replace("Z", "+00:00")
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                return str(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         et = dt.astimezone(self._tz)
